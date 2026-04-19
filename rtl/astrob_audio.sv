@@ -53,7 +53,8 @@ module astrob_audio (
         end
     end
 
-    wire sound_on = ~latch_3f[6];
+//    wire sound_on = ~latch_3f[6];
+    wire sound_on = 1'b1;
 
     //------------------------------------------------------------------------
     // CH0 — TONE (square wave, freq selected by most-recent trigger)
