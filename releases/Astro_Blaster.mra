@@ -1,0 +1,122 @@
+<misterromdescription>
+    <name>Astro Blaster</name>
+    <region>World</region>
+    <homebrew>no</homebrew>
+    <bootleg>no</bootleg>
+    <version></version>
+    <alternative></alternative>
+    <platform>Sega G-80 Raster</platform>
+    <series>Astro Blaster</series>
+    <year>1981</year>
+    <manufacturer>Sega / Gremlin</manufacturer>
+    <category>Shooter</category>
+
+    <setname>astrob</setname>
+    <parent>astrob</parent>
+    <mameversion>0270</mameversion>
+    <rbf>SegaG80</rbf>
+    <about></about>
+
+    <resolution>15kHz</resolution>
+    <rotation>vertical (ccw)</rotation>
+    <flip>no</flip>
+
+    <players>2 (alternating)</players>
+    <joystick>2-way horizontal</joystick>
+    <special_controls></special_controls>
+    <num_buttons>2</num_buttons>
+    <button_names>Fire,Warp</button_names>
+
+    <!--
+      DIP layout (MAME segag80r.cpp:720-747 + g80r_generic at 631-710)
+
+      Byte 0 (dip_sw0, D3D2 = SW1):
+        bit 0..1  Lives          SW1:8,7   (00=2, 01=3*, 10=4, 11=5)
+        bit 2     Cabinet        SW1:6     (0=Cocktail, 1=Upright*)
+        bit 3     Demo Speech    SW1:5     (0=On*, 1=Off)
+        bit 4..7  Unused         SW1:4..1  (default 1)
+
+      Byte 1 (dip_sw1, D1D0 = SW2):
+        bit 0..3  Coin A         SW2:8..5  (MAME encoding — see list)
+        bit 4..7  Coin B         SW2:4..1
+
+      Factory default: F5 33
+        F5 = 1111 0101
+             |||| |||+-- Lives bit0 = 1
+             |||| ||+--- Lives bit1 = 0     → Lives = 01 = 3
+             |||| |+---- Cabinet = 1        → Upright
+             |||| +----- Demo Speech = 0    → On
+             ++++------- SW1:4..1 = 1       → unused
+        33 = 0011 0011
+             |||| |||+-- Coin A = 0011      → 1C/1C
+             ++++------- Coin B = 0011      → 1C/1C
+    -->
+    <switches default="F5 33">
+        <dip bits="0,1"   name="Lives"        ids="2,3,4,5"/>
+        <dip bits="2"     name="Cabinet"      ids="Cocktail,Upright"/>
+        <dip bits="3"     name="Demo Speech"  ids="On,Off"/>
+        <dip bits="8,11"  name="Coin A"       ids="4C/1C,3C/1C,2C/1C,1C/1C,1C/2C,1C/3C,1C/4C,1C/5C,1C/6C,2C/1C 5/3 6/4,2C/1C 4/3,1C/1C 5/6,1C/1C 4/5,1C/1C 2/3,1C/2C 5/11,1C/2C 4/9"/>
+        <dip bits="12,15" name="Coin B"       ids="4C/1C,3C/1C,2C/1C,1C/1C,1C/2C,1C/3C,1C/4C,1C/5C,1C/6C,2C/1C 5/3 6/4,2C/1C 4/3,1C/1C 5/6,1C/1C 4/5,1C/1C 2/3,1C/2C 5/11,1C/2C 4/9"/>
+    </switches>
+
+    <!-- Index 0: Main CPU ROMs — 48 KB contiguous into 0x0000-0xBFFF
+         astrob parent set (MAME segag80r.cpp:1213-1251).
+         u25 + u1..u19 = 20 × 2 KB = 40 KB at 0x0000-0x9FFF.
+         Pad 0xA000-0xBFFF with 0xFF (no ROM at those sockets). -->
+    <rom index="0" md5="none" zip="astrob.zip">
+        <part crc="14ae953c" name="829b.cpu-u25"/>
+        <part crc="a9aaaf38" name="907a.prom-u1"/>
+        <part crc="897f2b87" name="908a.prom-u2"/>
+        <part crc="55a339e6" name="909a.prom-u3"/>
+        <part crc="7972b60a" name="910a.prom-u4"/>
+        <part crc="af87520f" name="911a.prom-u5"/>
+        <part crc="b656f929" name="912a.prom-u6"/>
+        <part crc="321074b3" name="913a.prom-u7"/>
+        <part crc="90d2493e" name="914a.prom-u8"/>
+        <part crc="aaf828d1" name="915a.prom-u9"/>
+        <part crc="56d92ab9" name="916a.prom-u10"/>
+        <part crc="9dcdaf2d" name="917a.prom-u11"/>
+        <part crc="c9d09655" name="918a.prom-u12"/>
+        <part crc="448bd318" name="919a.prom-u13"/>
+        <part crc="3524a383" name="920a.prom-u14"/>
+        <part crc="98c14834" name="921a.prom-u15"/>
+        <part crc="4311513c" name="922a.prom-u16"/>
+        <part crc="50f0462c" name="923a.prom-u17"/>
+        <part crc="120a39c7" name="924a.prom-u18"/>
+        <part crc="790a7f4e" name="925a.prom-u19"/>
+        <!-- 0xA000 - 0xBFFF unpopulated on real PCB -->
+        <part repeat="0x2000">FF</part>
+    </rom>
+
+    <!-- Index 1: Speech board ROMs — RESERVED for future speech implementation.
+         T2.3 ships only port decode sinks ($38/$3B), no speech synthesis.
+         When a TMS5110 / LPC filter port is added, uncomment and wire the
+         load to the speech device's ROM slots.
+    <rom index="1" md5="none" zip="astrob.zip">
+        <part crc="5988c767" name="808b.speech-u7"/>
+        <part crc="893f228d" name="809a.speech-u6"/>
+        <part crc="ff0163c5" name="810.speech-u5"/>
+        <part crc="219f3978" name="811.speech-u4"/>
+        <part crc="410ad0d2" name="812a.speech-u3"/>
+    </rom>
+    -->
+
+    <!-- Index 2: CPU addressing / video PROMs — NOT CONSUMED by current RTL.
+         316-0764 is the mangled-port demangler (now expressed in RTL as the
+         `demangle()` function in T1.6). 316-0806 is the video color PROM
+         (unused on astrob — palette is RAM-driven per T1.5).
+         Left here for reference; future T3.x may consume via ioctl index 2.
+    <rom index="2" md5="none" zip="astrob.zip">
+        <part crc="358128b6" name="316-0806.video1-u52"/>
+        <part repeat="0x3E0">FF</part>
+        <part crc="c609b79e" name="316-0764.cpu-u15"/>
+    </rom>
+    -->
+
+    <!-- Index 3: Hiscore config (MiSTer hiscore module reads this slot).
+         Empty for now; fill in once hiscore addresses are mapped. -->
+    <rom index="3" md5="none"></rom>
+    <rom index="4"></rom>
+
+    <mratimestamp>20260418000000</mratimestamp>
+</misterromdescription>
