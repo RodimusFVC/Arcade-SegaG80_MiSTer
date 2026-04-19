@@ -97,17 +97,27 @@ module segag80_video (
         endcase
     endfunction
 
-    //------------------------------------------------------------------------
+//------------------------------------------------------------------------
     // Scanout pipeline — G80R character bitmap (MAME charlayout at
-    // segag80r.cpp:1021; draw_videoram at segag80r_v.cpp:632).
+    // segag80r.cpp:1021; videoram_w map at segag80r_v.cpp:260-277;
+    // draw_videoram at segag80r_v.cpp:632).
+    //
+    //   VRAM layout (per videoram_w — mark_dirty on offset & 0x800):
+    //     0x0000..0x07FF : tilemap (tile codes, 32x28 used)
+    //     0x0800..0x0FFF : plane 0 bitmap (LSB of pixel color)
+    //     0x1000..0x103F : palette (when video_control & 0x02)
+    //     0x1800..0x1FFF : plane 1 bitmap (MSB of pixel color)
     //
     //   Per tile:
-    //     tile_code = VRAM[effy*32 + effx]
-    //     plane 0   = VRAM[{tile_code, pix_row}]           (VRAM 0x0000..0x07FF)
-    //     plane 1   = VRAM[0x1000 | {tile_code, pix_row}]  (VRAM 0x1000..0x17FF)
-    //   Per pixel:
-    //     pixel_2bit = {plane1[x], plane0[x]}              (x=0 is LSB)
-    //     pal_index  = {tile_code[7:4], pixel_2bit}        (6 bits, 64-entry pal)
+    //     tile_code = VRAM[effy*32 + effx]                     (base 0x0000)
+    //     plane 0   = VRAM[0x0800 | {tile_code, pix_row}]      (base 0x0800)
+    //     plane 1   = VRAM[0x1800 | {tile_code, pix_row}]      (base 0x1800)
+    //   Per pixel (x = pix_col, 0 = leftmost pixel):
+    //     bit_sel    = 7 - x                                   (MAME xbits {0..7} = MSB first;
+    //                                                           bit-offset 0 is byte MSB per
+    //                                                           gfxdecode convention)
+    //     pixel_2bit = {plane1[bit_sel], plane0[bit_sel]}
+    //     pal_index  = {tile_code[7:4], pixel_2bit}            (6 bits, 64-entry pal)
     //
     // We prefetch tile N+1's data during pix_col 5,6,7 of tile N (3
     // single-cycle BRAM reads). 24 clk_sys per tile, 3 reads needed —
@@ -137,8 +147,9 @@ module segag80_video (
     reg  [7:0]  plane0_next;
     reg  [7:0]  plane1_next;
     wire [12:0] addr_tc_next = {3'b000, effy, eff_next_x};
-    wire [12:0] addr_p0_next = {2'b00,  tile_code_next, eff_pix_row};
-    wire [12:0] addr_p1_next = {2'b01,  tile_code_next, eff_pix_row};
+    wire [12:0] addr_p0_next = {2'b01,  tile_code_next, eff_pix_row};  // 0x0800 base
+    wire [12:0] addr_p1_next = {2'b11,  tile_code_next, eff_pix_row};  // 0x1800 base
+    // Plane base offsets per MAME segag80r_v.cpp videoram_w (mark_dirty on offset & 0x800).
     // addr_p1 has bit 12 set → VRAM offset 0x1000, matches charlayout.
 
     // scan_addr is now combinational (driven by pix_col schedule).
@@ -176,9 +187,12 @@ module segag80_video (
         end
     end
 
-    // Current-pixel lookup:
-    wire       plane0_bit = plane0_cur[eff_pix_col];
-    wire       plane1_bit = plane1_cur[eff_pix_col];
+    // Current-pixel lookup.
+    // MAME charlayout xbits = {0,1,..,7}: leftmost pixel (pix_col=0) takes bit-offset 0,
+    // which per MAME's gfxdecode extraction is the byte's MSB (bit 7).  So bit index = ~pix_col.
+    wire [2:0] bit_sel    = ~eff_pix_col;
+    wire       plane0_bit = plane0_cur[bit_sel];
+    wire       plane1_bit = plane1_cur[bit_sel];
     wire [1:0] pixel_2bit = {plane1_bit, plane0_bit};
     wire [5:0] pal_index  = {tile_code_cur[7:4], pixel_2bit};
     wire [7:0] pal_entry  = pal[pal_index];
