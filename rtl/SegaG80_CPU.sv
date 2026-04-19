@@ -193,18 +193,20 @@ assign addr_o = cpu_addr;
 assign dout_o = cpu_dout;
 
 //----------------------------------------------------------------------------
-// Scrambled-write PC latch — MAME segag80r.cpp:400-410
-//   On M1 opcode fetch: if fetched byte is 0x32 (LD (nn),A), latch PC.
-//   Else, reset sentinel 0xFFFF.
+// Scrambled-write PC latch — MAME segag80r.cpp:400-410 (g80r_opcode_r)
+//   On every M1 opcode fetch: latch PC if the fetched byte is 0x32
+//   (LD (nn),A), otherwise set sentinel 0xFFFF.
+//
+//   MAME updates m_scrambled_write_pc ONLY inside g80r_opcode_r and never
+//   clears it after the write — it is simply overwritten by the next
+//   opcode fetch. We match that lifecycle so decrypt_addr stays valid
+//   across the entire MW cycle (and any future multi-tick WR_n timing).
 //----------------------------------------------------------------------------
 reg [15:0] scrambled_write_pc;
 wire       m1_read = ~m1_n & ~rd_n & ~mreq_n;
-wire       ram_or_vram_write = (ram_sel | vram_sel) & mem_write & ce_cpu;
 
 always @(posedge clk_sys or posedge reset) begin
     if (reset)
-        scrambled_write_pc <= 16'hFFFF;
-    else if (ram_or_vram_write & decrypt_active)
         scrambled_write_pc <= 16'hFFFF;
     else if (m1_read & ce_cpu) begin
         if (cpu_din == 8'h32)
@@ -215,9 +217,9 @@ always @(posedge clk_sys or posedge reset) begin
 end
 
 //----------------------------------------------------------------------------
-// Decrypt block — munges the low byte of the write address when a
-// scrambled PC is latched. One-shot: consumed by the first write after
-// latching.
+// Decrypt block — munges the low byte of the write address while
+// scrambled_write_pc is valid. Stays valid from the 0x32 M1 fetch until
+// the next opcode fetch, matching MAME's m_scrambled_write_pc lifecycle.
 //----------------------------------------------------------------------------
 wire [2:0] chip_sel =
     (GAME_ID == 2'd0) ? 3'd1 :   // ASTROB → 62
