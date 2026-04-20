@@ -1,0 +1,85 @@
+
+Compile list for the T48 uController project
+============================================
+
+bench/vhdl/if_timing.vhd
+rtl/vhdl/t48_pack-p.vhd
+rtl/vhdl/psw.vhd
+rtl/vhdl/pmem_ctrl_pack-p.vhd
+rtl/vhdl/pmem_ctrl.vhd
+rtl/vhdl/p2.vhd
+rtl/vhdl/p1.vhd
+rtl/vhdl/timer.vhd
+rtl/vhdl/dmem_ctrl_pack-p.vhd
+rtl/vhdl/dmem_ctrl.vhd
+rtl/vhdl/decoder_pack-p.vhd
+rtl/vhdl/cond_branch_pack-p.vhd
+rtl/vhdl/alu_pack-p.vhd
+rtl/vhdl/int.vhd
+rtl/vhdl/t48_tb_pack-p.vhd
+rtl/vhdl/decoder.vhd
+rtl/vhdl/db_bus.vhd
+rtl/vhdl/cond_branch.vhd
+rtl/vhdl/clock_ctrl.vhd
+rtl/vhdl/bus_mux.vhd
+rtl/vhdl/alu.vhd
+rtl/vhdl/t48_core.vhd
+rtl/vhdl/system/generic_ram_ena.vhd
+rtl/vhdl/system/lpm_rom.vhd
+bench/vhdl/tb.vhd
+Elaborate tb
+
+rtl/vhdl/system/t48_rom-e.vhd
+bench/vhdl/t48_rom-lpm-a.vhd
+rtl/vhdl/system/t8048_notri.vhd
+rtl/vhdl/system/t8048.vhd
+bench/vhdl/tb_t8048.vhd
+Elaborate tb_t8048
+
+rtl/vhdl/system/t8039_notri.vhd
+rtl/vhdl/system/t8039.vhd
+bench/vhdl/tb_t8039.vhd
+Elaborate tb_t8039
+
+rtl/vhdl/t8243/t8243_core.vhd
+rtl/vhdl/t8243/t8243_async_notri.vhd
+rtl/vhdl/t8243/t8243.vhd
+bench/vhdl/tb_t8048_t8243.vhd
+Elaborate tb_t8048_t8243
+
+rtl/vhdl/t8243/t8243_sync_notri.vhd
+bench/vhdl/tb_t8243.vhd
+Elaborate tb_t8243
+
+rtl/vhdl/upi41_db_bus.vhd
+rtl/vhdl/upi41_core.vhd
+rtl/vhdl/system/t8041_notri.vhd
+rtl/vhdl/system/t8041.vhd
+bench/vhdl/upi_stim.vhd
+bench/vhdl/tb_t8041.vhd
+Elaborate tb_t8041
+
+rtl/vhdl/system/t8041a_notri.vhd
+rtl/vhdl/system/t8041a.vhd
+bench/vhdl/tb_t8041a.vhd
+Elaborate tb_t8041a
+
+rtl/vhdl/system/t49_rom-e.vhd
+bench/vhdl/t49_rom-lpm-a.vhd
+rtl/vhdl/system/t8042ah_notri.vhd
+rtl/vhdl/system/t8042ah.vhd
+bench/vhdl/tb_t8042ah.vhd
+Elaborate tb_t8042ah
+
+rtl/vhdl/t21_core.vhd
+rtl/vhdl/system/t8021_notri.vhd
+rtl/vhdl/system/t8021.vhd
+bench/vhdl/tb_t8021.vhd
+Elaborate tb_t8021
+
+rtl/vhdl/adc.vhd
+rtl/vhdl/t22_core.vhd
+rtl/vhdl/system/t8022_notri.vhd
+rtl/vhdl/system/t8022.vhd
+bench/vhdl/tb_t8022.vhd
+Elaborate tb_t8022

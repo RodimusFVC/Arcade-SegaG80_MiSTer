@@ -61,7 +61,11 @@ module SegaG80_CPU #(
     output             audio_we_o,
     output             audio_addr_o,
     output       [7:0] audio_din_o,
-    output             ce_cpu_o
+    output             ce_cpu_o,
+
+    // Speech board write strobes (to segaspeech in parent)
+    output             speech_data_we_o,    // port $38
+    output             speech_ctrl_we_o     // port $3B
 );
 
 //----------------------------------------------------------------------------
@@ -270,13 +274,8 @@ wire io_fc    = (port_addr == 8'hFC);
 wire io_3e_3f = (port_addr == 8'h3E) | (port_addr == 8'h3F);
 
 // Speech board ($38 data, $3B control) — MAME segag80r.cpp:1889-1891.
-// Decoded here to keep the bus happy; data is dropped. See T2.3 notes.
-wire io_38    = (port_addr == 8'h38);
-wire io_3b    = (port_addr == 8'h3B);
-wire io_speech = io_38 | io_3b;
-
-// Silence lint warning by using the signal in a way the optimizer drops.
-(* keep = "false" *) wire _speech_sink = io_speech & io_write;
+wire io_38 = (port_addr == 8'h38);
+wire io_3b = (port_addr == 8'h3B);
 
 //----------------------------------------------------------------------------
 // Program ROM (48 KB) — loaded from ioctl index 0
@@ -472,5 +471,9 @@ assign audio_we_o   = io_write & io_3e_3f;
 assign audio_addr_o = port_addr[0];
 assign audio_din_o  = cpu_dout;
 assign ce_cpu_o     = ce_cpu;
+
+// Speech board strobes (MAME segag80r.cpp:1890-1891)
+assign speech_data_we_o = io_write & io_38 & ce_cpu;
+assign speech_ctrl_we_o = io_write & io_3b & ce_cpu;
 
 endmodule

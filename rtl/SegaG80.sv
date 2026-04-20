@@ -83,12 +83,23 @@ wire        vflip;
 // Videoram/palette output from T1.5
 wire  [7:0] pix_r8, pix_g8, pix_b8;
 
-// Audio from T2.2
-wire signed [15:0] snd_out;
-
 // Audio bus between CPU and astrob_audio
 wire        audio_we, audio_addr_w, ce_cpu_s;
 wire  [7:0] audio_din_w;
+
+// Speech board control surface
+wire        speech_data_we;
+wire        speech_ctrl_we;
+
+// Speech ROM interfaces
+wire [10:0] speech_cpu_addr;
+wire  [7:0] speech_cpu_data;
+wire [13:0] speech_data_addr;
+wire  [7:0] speech_data_data;
+
+// Speech audio output
+wire signed [15:0] speech_sample;
+wire               speech_valid;
 
 //----------------------------------------------------------------------------
 // CPU + ROM + address decode (T1.2 fills this in)
@@ -143,7 +154,9 @@ SegaG80_CPU #(
     .audio_we_o          (audio_we),
     .audio_addr_o        (audio_addr_w),
     .audio_din_o         (audio_din_w),
-    .ce_cpu_o            (ce_cpu_s)
+    .ce_cpu_o            (ce_cpu_s),
+    .speech_data_we_o    (speech_data_we),
+    .speech_ctrl_we_o    (speech_ctrl_we)
 );
 
 //----------------------------------------------------------------------------
@@ -185,8 +198,10 @@ segag80_video video_inst (
 );
 
 //----------------------------------------------------------------------------
-// Audio — Astro Blaster simplified approximation
+// Audio — Astro Blaster synthesized effects
 //----------------------------------------------------------------------------
+wire signed [15:0] astrob_sample;
+
 astrob_audio audio_inst (
     .clk_sys    (clk_sys),
     .reset      (reset),
@@ -194,7 +209,55 @@ astrob_audio audio_inst (
     .audio_addr (audio_addr_w),
     .audio_din  (audio_din_w),
     .ce_cpu     (ce_cpu_s),
-    .audio_out  (snd_out)
+    .audio_out  (astrob_sample)
+);
+
+//----------------------------------------------------------------------------
+// Speech board (Sega 315-0061 daughterboard — 8035 + SP0250)
+//----------------------------------------------------------------------------
+
+// ioctl address selectors (MRA layout: main 0x00000–0x0BFFF, char 0x0C000–0x0FFFF,
+//   speech CPU 0x10000–0x107FF, speech data 0x10800–0x127FF).
+wire ioctl_speech_cpu_sel  = (ioctl_addr >= 25'h10000) && (ioctl_addr < 25'h10800);
+wire ioctl_speech_data_sel = (ioctl_addr >= 25'h10800) && (ioctl_addr < 25'h12800);
+
+// 8035 program ROM — 2 KB
+speech_cpu_rom u_speech_cpu_rom (
+    .clk          (clk_sys),
+    .ioctl_addr   (ioctl_addr[10:0]),
+    .ioctl_data   (ioctl_data),
+    .ioctl_wr     (ioctl_wr & ioctl_speech_cpu_sel),
+    .cpu_addr     (speech_cpu_addr),
+    .cpu_data     (speech_cpu_data)
+);
+
+// Speech data ROM — 8 KB populated (809a/810/811/812a)
+// ioctl_addr[12:0] - 13'h800 gives the 0x0000-0x1FFF offset within this ROM;
+// modular 13-bit subtraction is correct for the full 0x10800-0x127FF range.
+wire [12:0] speech_data_wr_addr = ioctl_addr[12:0] - 13'h800;
+
+speech_data_rom u_speech_data_rom (
+    .clk          (clk_sys),
+    .ioctl_addr   (speech_data_wr_addr),
+    .ioctl_data   (ioctl_data),
+    .ioctl_wr     (ioctl_wr & ioctl_speech_data_sel),
+    .cpu_addr     (speech_data_addr),
+    .cpu_data     (speech_data_data)
+);
+
+segaspeech u_segaspeech (
+    .clk              (clk_sys),
+    .reset_n          (~reset),
+    .data_w           (audio_din_w),
+    .data_we          (speech_data_we),
+    .ctrl_w           (audio_din_w),
+    .ctrl_we          (speech_ctrl_we),
+    .rom_8035_addr    (speech_cpu_addr),
+    .rom_8035_data    (speech_cpu_data),
+    .rom_speech_addr  (speech_data_addr),
+    .rom_speech_data  (speech_data_data),
+    .audio_out        (speech_sample),
+    .audio_valid      (speech_valid)
 );
 
 //----------------------------------------------------------------------------
@@ -208,7 +271,14 @@ assign ce_pix       = ce_pix_i;
 assign video_r      = pix_r8;
 assign video_g      = pix_g8;
 assign video_b      = pix_b8;
-assign audio_out    = snd_out;
+// Mix: astrob_audio (full gain) + speech (half gain per MAME vol balance).
+wire signed [15:0] speech_halved = {speech_sample[15], speech_sample[15:1]};
+wire signed [16:0] mixed = $signed({astrob_sample[15], astrob_sample})
+                         + $signed({speech_halved[15], speech_halved});
+assign audio_out =
+    (mixed >  17'sd32767) ?  16'sd32767 :
+    (mixed < -17'sd32768) ? -16'sd32768 :
+                             mixed[15:0];
 
 // CPU data-in tied off until T1.2 wires the bus (this will be removed by T1.2).
 assign cpu_din = 8'hFF;

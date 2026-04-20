@@ -1,0 +1,60 @@
+name: Run regression
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+
+    - uses: ghdl/setup-ghdl@v1
+      with:
+        version: latest
+        backend: llvm
+        
+    - name: Set env for project
+      run: |
+        echo "PROJECT_DIR=$GITHUB_WORKSPACE" >> $GITHUB_ENV
+        echo "VERIF_DIR=$GITHUB_WORKSPACE/sw/verif" >> $GITHUB_ENV
+        echo "SIM_DIR=$GITHUB_WORKSPACE/sim/rtl_sim" >> $GITHUB_ENV
+        echo "PATH=$GITHUB_WORKSPACE/.asl/bin:$PATH" >> $GITHUB_ENV
+
+    - name: Build test benches
+      run: |
+        cd $SIM_DIR
+        make
+
+    - name: Cache asl
+      id: cache-asl
+      uses: actions/cache@v3
+      with:
+        path: .asl
+        key: ${{ runner.os }}-asl
+
+    - name: Build asl
+      if: steps.cache-asl.outputs.cache-hit != 'true'
+      run: |
+        wget http://john.ccac.rwth-aachen.de:8000/ftp/as/source/c_version/asl-current.tar.gz
+        tar -xzf asl-current.tar.gz
+        cd asl-current
+        sed -i -e 's/all: binaries docs/all: binaries/' Makefile
+        sed -e 's/\/usr\/local/$(GITHUB_WORKSPACE)\/.asl/' Makefile.def.tmpl > Makefile.def
+        make install
+
+    - name: Run test benches
+      run: |
+        cd $PROJECT_DIR/sw
+        ./run_regression.pl >& regression.log
+        ! grep -E 'Processing|Executing|Result|stopped' regression.log | grep -q -E 'FAIL|stopped'
+
+    - uses: actions/upload-artifact@v4
+      with:
+        name: regression-log
+        path: sw/regression.log

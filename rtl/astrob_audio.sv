@@ -25,35 +25,48 @@ module astrob_audio (
     // Latches
     //------------------------------------------------------------------------
     reg [7:0] latch_3e, latch_3f;
-    reg [7:0] prev_3e, prev_3f;
     reg [7:0] trig_3e, trig_3f;    // one-shot pulses on falling edges
 
     always @(posedge clk_sys or posedge reset) begin
         if (reset) begin
             latch_3e <= 8'hFF;
             latch_3f <= 8'hFF;
-            prev_3e  <= 8'hFF;
-            prev_3f  <= 8'hFF;
             trig_3e  <= 8'h00;
             trig_3f  <= 8'h00;
         end else begin
             trig_3e <= 8'h00;
             trig_3f <= 8'h00;
             if (audio_we & ce_cpu) begin
+                // MAME discrete-trigger pattern (segag80r_a.cpp:252):
+                //   if ((diff & BIT) && !(data & BIT)) start()
+                // Falling edge on a bit = trigger.
                 if (audio_addr == 1'b0) begin
+                    trig_3e  <= latch_3e & ~audio_din;
                     latch_3e <= audio_din;
-                    prev_3e  <= latch_3e;
-                    trig_3e  <= latch_3e & ~audio_din;   // falling edges
                 end else begin
-                    latch_3f <= audio_din;
-                    prev_3f  <= latch_3f;
                     trig_3f  <= latch_3f & ~audio_din;
+                    latch_3f <= audio_din;
                 end
             end
         end
     end
 
-//    wire sound_on = ~latch_3f[6];
+    //------------------------------------------------------------------------
+    // Envelope tick: ~1 kHz (clk_sys / 15468). 16-bit envelopes give ~65 s
+    // of decay at full range; per-channel init controls effective length.
+    //------------------------------------------------------------------------
+    reg [13:0] env_tick_div;
+    wire       env_tick = (env_tick_div == 14'd0);
+    always @(posedge clk_sys or posedge reset) begin
+        if (reset)          env_tick_div <= 14'd15467;
+        else if (env_tick)  env_tick_div <= 14'd15467;
+        else                env_tick_div <= env_tick_div - 14'd1;
+    end
+
+    // MAME segag80.cpp:177 — astrob_audio uses lomask=0xff, himask=0xff;
+    // every bit on $3E/$3F feeds the discrete-components netlist. No
+    // dedicated SOUND_ON bit at the port level. If schematic work later
+    // identifies a global mute, reinstate it here.
     wire sound_on = 1'b1;
 
     //------------------------------------------------------------------------
@@ -84,7 +97,10 @@ module astrob_audio (
             else if (trig_3e[6]) begin tone_div <= 16'd7734;  tone_env <= 16'hFFFF; end
             else if (trig_3f[4]) begin tone_div <= 16'd8789;  tone_env <= 16'hFFFF; end
             else if (trig_3f[5]) begin tone_div <= 16'd35154; tone_env <= 16'hFFFF; end
-            else if (tone_env != 16'd0) tone_env <= tone_env - 16'd1;
+            else if (tone_env != 16'd0 && env_tick) begin
+                // ~250 ms full decay: 65536 / 256 = 256 ticks × 1 ms
+                tone_env <= (tone_env <= 16'd256) ? 16'd0 : (tone_env - 16'd256);
+            end
 
             if (tone_div != 16'd0) begin
                 if (tone_cnt == 16'd0) begin
@@ -119,8 +135,10 @@ module astrob_audio (
                 noise_env <= 16'h8000;
             else if (trig_3f[1])                   // long expl
                 noise_env <= 16'hFFFF;
-            else if (noise_env != 16'd0)
-                noise_env <= noise_env - 16'd1;
+            else if (noise_env != 16'd0 && env_tick) begin
+                // ~1 s full decay: 65536 / 64 = 1024 ticks
+                noise_env <= (noise_env <= 16'd64) ? 16'd0 : (noise_env - 16'd64);
+            end
 
             if (noise_clk_cnt == 8'd0) begin
                 noise_clk_cnt <= noise_clk_div;
@@ -156,13 +174,15 @@ module astrob_audio (
             end
 
             if (laser_env != 16'd0) begin
-                // Every ~400 µs, bump divisor upward (pitch bend down)
-                laser_sweep_cnt <= laser_sweep_cnt + 14'd1;
-                if (laser_sweep_cnt == 14'd6000) begin
-                    laser_sweep_cnt <= 14'd0;
-                    laser_div       <= laser_div + 16'd100;
+                if (env_tick) begin
+                    laser_sweep_cnt <= laser_sweep_cnt + 14'd1;
+                    if (laser_sweep_cnt == 14'd8) begin // ~8 ms per sweep step
+                        laser_sweep_cnt <= 14'd0;
+                        laser_div       <= laser_div + 16'd80;
+                    end
+                    // ~500 ms full decay: 65536 / 128 = 512 ticks
+                    laser_env <= (laser_env <= 16'd128) ? 16'd0 : (laser_env - 16'd128);
                 end
-                laser_env <= laser_env - 16'd1;
 
                 if (laser_cnt == 16'd0) begin
                     laser_cnt <= laser_div;
