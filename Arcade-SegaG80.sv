@@ -425,6 +425,13 @@ always @(posedge CLK_SYS) begin
 		dip_sw[ioctl_addr[2:0]] <= ioctl_dout;
 end
 
+// Game ID — latched from MRA ioctl_index=1 byte 0, must arrive before index=0 ROM data.
+// 0=ASTROB, 1=MONSTERB, 2=SPACEOD/PIGNEWT, 3=005, 4=SINDBADM(unsupported)
+reg [2:0] game_id;
+always @(posedge CLK_SYS)
+	if (ioctl_wr && (ioctl_index == 8'd1) && (ioctl_addr == 25'd0))
+		game_id <= ioctl_dout[2:0];
+
 ///////////////                 Video                  ////////////////
 
 wire hblank, vblank;
@@ -483,6 +490,7 @@ SegaG80 g80_inst
 (
 	.reset(reset),
 	.clk_sys(CLK_SYS),
+	.game_id(game_id),
 
 	// Player 1 controls (active HIGH)
 	.p1_up   (m_up1),

@@ -1,0 +1,130 @@
+<misterromdescription>
+    <name>Monster Bash</name>
+    <region>World</region>
+    <homebrew>no</homebrew>
+    <bootleg>no</bootleg>
+    <version></version>
+    <alternative></alternative>
+    <platform>Sega G-80 Raster</platform>
+    <series>Monster Bash</series>
+    <year>1982</year>
+    <manufacturer>Sega</manufacturer>
+    <category>Shooter</category>
+
+    <setname>monsterb</setname>
+    <parent>monsterb</parent>
+    <mameversion>0270</mameversion>
+    <rbf>SegaG80</rbf>
+    <about></about>
+
+    <!-- Index 1: Game ID byte — MUST appear before index 0 in MRA.
+         0x01 = Monster Bash (315-0082 security chip). -->
+    <rom index="1"><part>01</part></rom>
+
+    <resolution>15kHz</resolution>
+    <rotation>vertical (ccw)</rotation>
+    <flip>no</flip>
+
+    <players>2 (alternating)</players>
+    <joystick>4-way</joystick>
+    <special_controls></special_controls>
+    <num_buttons>1</num_buttons>
+    <button_names>Fire</button_names>
+
+    <!--
+      DIP layout (MAME segag80r.cpp:843-884 + g80r_generic at 631-710)
+
+      Byte 0 (dip_sw0, D3D2 = SW1):
+        bit 0..1  Lives          SW1:8,7  (00=3*, 10=4, 01=5, 11=6)
+        bit 2     Cabinet        SW1:6    (0=Cocktail, 1=Upright*)
+        bit 3..4  Difficulty     SW1:5,4  (00=Easy, 10=Medium*, 01=Hard, 11=Hardest)
+        bit 5..6  Bonus Life     SW1:3,2  (10=10000, 01=20000*, 11=40000, 00=None)
+          NOTE: MAME PORT_DIPNAME( 0x60, 0x40, ...) → default 0x40 = bits[6:5]=10 → 20000
+        bit 7     Infinite Lives SW1:1    (0=On, 1=Off*)
+
+      Byte 1 (dip_sw1, D1D0 = SW2):
+        bit 0..3  Coin A     SW2:8..5
+        bit 4..7  Coin B     SW2:4..1
+
+      Factory default: D4 33
+        D4 = 1101 0100
+             |||| ||+-- Lives bit0 = 0
+             |||| |+--- Lives bit1 = 0  → Lives = 00 = 3
+             |||| +---- Cabinet = 1     → Upright
+             |||+------ Difficulty bit0 = 0
+             ||+------- Difficulty bit1 = 1 → Medium
+             |+-------- Bonus bit0 = 0
+             +--------- Bonus bit1 = 1  → 20000 (bit6=1, bit5=0 → 0x40)
+                        (bit7 not shown above, = 1 for Inf Off)
+        Recomputing: bit7=1,bit6=1,bit5=0,bit4=1,bit3=0,bit2=1,bit1=0,bit0=0 = 0xD4
+        33 = 0011 0011  → 1C/1C both coins
+
+      NOTE (1): GAME_ID blocker — current RBF has GAME_ID=0 (315-0062/ASTROB) hardwired.
+      Monster Bash requires 315-0082 security chip (GAME_ID=1 per SegaG80.sv, but not yet
+      wired in SegaG80_CPU.sv). Core change needed before this game can decrypt correctly.
+
+      NOTE (2): Background board ROMs (gfx1, gfx2) and sound board ROMs (7751, UPD7751)
+      not loaded — RTL has no Monster Bash background or sound board support yet.
+      Monster Bash also uses an 8255 PPI for sound control (main_ppi8255_portmap),
+      different from Astro Blaster's direct port writes.
+    -->
+    <switches default="D4 33">
+        <dip bits="0,1"   name="Lives"        ids="3,5,4,6"/>
+        <dip bits="2"     name="Cabinet"      ids="Cocktail,Upright"/>
+        <dip bits="3,4"   name="Difficulty"   ids="Easy,Hard,Medium,Hardest"/>
+        <dip bits="5,6"   name="Bonus Life"   ids="None,40000,10000,20000"/>
+        <dip bits="7"     name="Infinite Lives (Cheat)" ids="On,Off"/>
+        <dip bits="8,11"  name="Coin A"       ids="4C/1C,3C/1C,2C/1C,1C/1C,1C/2C,1C/3C,1C/4C,1C/5C,1C/6C,2C/1C 5/3 6/4,2C/1C 4/3,1C/1C 5/6,1C/1C 4/5,1C/1C 2/3,1C/2C 5/11,1C/2C 4/9"/>
+        <dip bits="12,15" name="Coin B"       ids="4C/1C,3C/1C,2C/1C,1C/1C,1C/2C,1C/3C,1C/4C,1C/5C,1C/6C,2C/1C 5/3 6/4,2C/1C 4/3,1C/1C 5/6,1C/1C 4/5,1C/1C 2/3,1C/2C 5/11,1C/2C 4/9"/>
+    </switches>
+
+    <!-- Index 0: Main CPU ROMs — 48 KB contiguous into 0x0000-0xBFFF
+         monsterb parent set (MAME segag80r.cpp:1622-1665).
+         cpu-u25 + u1..u23 = 24 × 2 KB = 48 KB at 0x0000-0xBFFF. No padding needed. -->
+    <rom index="0" md5="none" zip="monsterb.zip">
+        <part crc="19761be3" name="1778.cpu-u25"/>
+        <part crc="5b67dc4c" name="1779c.prom-u1"/>
+        <part crc="fac5aac6" name="1780b.prom-u2"/>
+        <part crc="3b104103" name="1781b.prom-u3"/>
+        <part crc="c1523553" name="1782b.prom-u4"/>
+        <part crc="e0ea08c5" name="1783b.prom-u5"/>
+        <part crc="48976d11" name="1784b.prom-u6"/>
+        <part crc="297d33ae" name="1785b.prom-u7"/>
+        <part crc="ef94c8f4" name="1786b.prom-u8"/>
+        <part crc="1b62994e" name="1787b.prom-u9"/>
+        <part crc="a2e32d91" name="1788b.prom-u10"/>
+        <part crc="08a172dc" name="1789b.prom-u11"/>
+        <part crc="4e320f9d" name="1790b.prom-u12"/>
+        <part crc="3b4cba31" name="1791b.prom-u13"/>
+        <part crc="7707b9f8" name="1792b.prom-u14"/>
+        <part crc="a5d05155" name="1793b.prom-u15"/>
+        <part crc="e4813da9" name="1794b.prom-u16"/>
+        <part crc="4cd6ed88" name="1795b.prom-u17"/>
+        <part crc="9f141a42" name="1796b.prom-u18"/>
+        <part crc="ec14ad16" name="1797b.prom-u19"/>
+        <part crc="86743a4f" name="1798b.prom-u20"/>
+        <part crc="41198a83" name="1799b.prom-u21"/>
+        <part crc="6a062a04" name="1800b.prom-u22"/>
+        <part crc="f38488fe" name="1801b.prom-u23"/>
+    </rom>
+
+    <!-- Index 1: Background board ROMs — NOT CONSUMED.
+         Monster Bash background board: gfx1 (2 × 8 KB), gfx2 (1 × 8 KB).
+         Sound board ROMs: 7751 program (1 KB), UPD7751 samples (2 × 4 KB).
+         RTL has no Monster Bash background or sound board support yet.
+    <rom index="1" md5="none" zip="monsterb.zip">
+        <part crc="e93a2281" name="1516.bg-u13"/>
+        <part crc="1e589101" name="1517.bg-u8"/>
+        <part crc="2d5932fe" name="1518a.bg-u22"/>
+        <part crc="6a9534fc" name="7751.bin"/>
+        <part crc="b525ce8f" name="1543snd.bin"/>
+        <part crc="56c79fb0" name="1544snd.bin"/>
+    </rom>
+    -->
+
+    <!-- Index 2: Reserved for hiscore. -->
+    <rom index="2" md5="none"></rom>
+    <rom index="3"></rom>
+
+    <mratimestamp>20260510000000</mratimestamp>
+</misterromdescription>

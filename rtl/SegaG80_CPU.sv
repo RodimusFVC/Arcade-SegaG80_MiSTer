@@ -6,11 +6,10 @@
 //
 //============================================================================
 
-module SegaG80_CPU #(
-    parameter [1:0] GAME_ID = 2'd0
-) (
+module SegaG80_CPU (
     input              reset,
     input              clk_sys,       // 15.468480 MHz
+    input        [2:0] game_id,       // 0=ASTROB,1=MONSTERB,2=SPACEOD/PIGNEWT,3=005,4=rsvd
     input              pause,
     input              service,       // active HIGH, edge → NMI
 
@@ -226,9 +225,11 @@ end
 // the next opcode fetch, matching MAME's m_scrambled_write_pc lifecycle.
 //----------------------------------------------------------------------------
 wire [2:0] chip_sel =
-    (GAME_ID == 2'd0) ? 3'd1 :   // ASTROB → 62
-    (GAME_ID == 2'd1) ? 3'd6 :   // MONSTERB → 82
-    /* SPACEOD */       3'd0;    // no decrypt
+    (game_id == 3'd0) ? 3'd1 :   // ASTROB          → 315-0062
+    (game_id == 3'd1) ? 3'd6 :   // MONSTERB         → 315-0082
+    (game_id == 3'd2) ? 3'd2 :   // SPACEOD/PIGNEWT  → 315-0063
+    (game_id == 3'd3) ? 3'd4 :   // 005              → 315-0070
+                        3'd0;    // SINDBADM/unknown  → no-op
 
 wire [7:0] decrypted_lo;
 segag80_decrypt decrypt_inst (

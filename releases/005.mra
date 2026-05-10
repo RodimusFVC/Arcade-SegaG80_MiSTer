@@ -1,0 +1,106 @@
+<misterromdescription>
+    <name>005</name>
+    <region>World</region>
+    <homebrew>no</homebrew>
+    <bootleg>no</bootleg>
+    <version></version>
+    <alternative></alternative>
+    <platform>Sega G-80 Raster</platform>
+    <series>005</series>
+    <year>1981</year>
+    <manufacturer>Sega</manufacturer>
+    <category>Shooter</category>
+
+    <setname>005</setname>
+    <parent>005</parent>
+    <mameversion>0270</mameversion>
+    <rbf>SegaG80</rbf>
+    <about></about>
+
+    <!-- Index 1: Game ID byte — MUST appear before index 0 in MRA.
+         0x03 = 005 (315-0070 security chip). -->
+    <rom index="1"><part>03</part></rom>
+
+    <resolution>15kHz</resolution>
+    <rotation>vertical (ccw)</rotation>
+    <flip>no</flip>
+
+    <players>2 (alternating)</players>
+    <joystick>4-way</joystick>
+    <special_controls></special_controls>
+    <num_buttons>1</num_buttons>
+    <button_names>Fire</button_names>
+
+    <!--
+      DIP layout (MAME segag80r.cpp:762-790 + g80r_generic at 631-710)
+
+      Byte 0 (dip_sw0, D3D2 = SW1):
+        bit 0..1  Lives      SW1:8,7  (00=3*, 10=4, 01=5, 11=6)
+        bit 2     Cabinet    SW1:6    (0=Cocktail, 1=Upright*)
+        bit 3..7  Unused              (default 1)
+
+      Byte 1 (dip_sw1, D1D0 = SW2):
+        bit 0..3  Coin A     SW2:8..5 (same table as astrob)
+        bit 4..7  Coin B     SW2:4..1
+
+      Factory default: FC 33
+        FC = 1111 1100
+             |||| ||+-- Lives bit0 = 0
+             |||| |+--- Lives bit1 = 0  → Lives = 00 = 3
+             |||| +---- Cabinet = 1     → Upright
+             ++++------ Unused = 1
+        33 = 0011 0011  → 1C/1C both coins
+
+      NOTE: GAME_ID blocker — current RBF has GAME_ID=0 (315-0062/ASTROB) hardwired.
+      005 requires 315-0070 security chip (GAME_ID TBD once runtime selection is added).
+      Core change needed before this game can decrypt correctly.
+    -->
+    <switches default="FC 33">
+        <dip bits="0,1"   name="Lives"   ids="3,5,4,6"/>
+        <dip bits="2"     name="Cabinet" ids="Cocktail,Upright"/>
+        <dip bits="8,11"  name="Coin A"  ids="4C/1C,3C/1C,2C/1C,1C/1C,1C/2C,1C/3C,1C/4C,1C/5C,1C/6C,2C/1C 5/3 6/4,2C/1C 4/3,1C/1C 5/6,1C/1C 4/5,1C/1C 2/3,1C/2C 5/11,1C/2C 4/9"/>
+        <dip bits="12,15" name="Coin B"  ids="4C/1C,3C/1C,2C/1C,1C/1C,1C/2C,1C/3C,1C/4C,1C/5C,1C/6C,2C/1C 5/3 6/4,2C/1C 4/3,1C/1C 5/6,1C/1C 4/5,1C/1C 2/3,1C/2C 5/11,1C/2C 4/9"/>
+    </switches>
+
+    <!-- Index 0: Main CPU ROMs — 48 KB contiguous into 0x0000-0xBFFF
+         005 parent set (MAME segag80r.cpp:1485-1514).
+         cpu-u25 + u1..u20 = 21 × 2 KB = 42 KB at 0x0000-0xA7FF.
+         Pad 0xA800-0xBFFF with 0xFF (sockets unpopulated). -->
+    <rom index="0" md5="none" zip="005.zip">
+        <part crc="8e68533e" name="1346b.cpu-u25"/>
+        <part crc="29e10a81" name="5092.prom-u1"/>
+        <part crc="e1edc3df" name="5093.prom-u2"/>
+        <part crc="995773bb" name="5094.prom-u3"/>
+        <part crc="f887f575" name="5095.prom-u4"/>
+        <part crc="5545241e" name="5096.prom-u5"/>
+        <part crc="428edb54" name="5097.prom-u6"/>
+        <part crc="5bcb9d63" name="5098.prom-u7"/>
+        <part crc="0ea24ba3" name="5099.prom-u8"/>
+        <part crc="a79af131" name="5100.prom-u9"/>
+        <part crc="8a1cdae0" name="5101.prom-u10"/>
+        <part crc="70826a15" name="5102.prom-u11"/>
+        <part crc="7f80c5b0" name="5103.prom-u12"/>
+        <part crc="0140930e" name="5104.prom-u13"/>
+        <part crc="17807a05" name="5105.prom-u14"/>
+        <part crc="c7cdfa9d" name="5106.prom-u15"/>
+        <part crc="95f8a2e6" name="5107.prom-u16"/>
+        <part crc="d371cacd" name="5108.prom-u17"/>
+        <part crc="48a20617" name="5109.prom-u18"/>
+        <part crc="7d26111a" name="5110.prom-u19"/>
+        <part crc="a888e175" name="5111.prom-u20"/>
+        <!-- 0xA800-0xBFFF unpopulated on real PCB -->
+        <part repeat="0x1800">FF</part>
+    </rom>
+
+    <!-- Index 1: Sound board ROMs — NOT CONSUMED.
+         005 uses a discrete melody generator + DAC sound board (no CPU ROM).
+         epr-1286.sound-16 is a 2716 used for the melody lookup table;
+         the 6331 sound PROM is marked BAD_DUMP in MAME.
+         Sound board is not emulated in current RTL. -->
+
+    <!-- Index 2: Reserved for hiscore. -->
+    <rom index="2" md5="none"></rom>
+    <rom index="3"></rom>
+
+    <mratimestamp>20260510000000</mratimestamp>
+</misterromdescription>

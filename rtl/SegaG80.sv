@@ -10,11 +10,10 @@
 //
 //============================================================================
 
-module SegaG80 #(
-    parameter [1:0] GAME_ID = 2'd0    // 0=ASTROB, 1=MONSTERB, 2=SPACEOD, 3=rsvd
-) (
+module SegaG80 (
     input                reset,
     input                clk_sys,      // 15.468480 MHz (MAME VIDEO_CLOCK)
+    input          [2:0] game_id,      // 0=ASTROB,1=MONSTERB,2=SPACEOD/PIGNEWT,3=005,4=rsvd
 
     // Player 1 controls (active HIGH)
     input                p1_up, p1_down, p1_left, p1_right,
@@ -104,9 +103,8 @@ wire               speech_valid;
 //----------------------------------------------------------------------------
 // CPU + ROM + address decode (T1.2 fills this in)
 //----------------------------------------------------------------------------
-SegaG80_CPU #(
-    .GAME_ID (GAME_ID)
-) cpu_board (
+SegaG80_CPU cpu_board (
+    .game_id       (game_id),
     .reset         (reset),
     .clk_sys       (clk_sys),
     .pause         (pause),
@@ -216,10 +214,10 @@ astrob_audio audio_inst (
 // Speech board (Sega 315-0061 daughterboard — 8035 + SP0250)
 //----------------------------------------------------------------------------
 
-// ioctl address selectors (MRA layout: main 0x00000–0x0BFFF, char 0x0C000–0x0FFFF,
-//   speech CPU 0x10000–0x107FF, speech data 0x10800–0x127FF).
-wire ioctl_speech_cpu_sel  = (ioctl_addr >= 25'h10000) && (ioctl_addr < 25'h10800);
-wire ioctl_speech_data_sel = (ioctl_addr >= 25'h10800) && (ioctl_addr < 25'h12800);
+// ioctl index selectors (MRA layout: game_id=index1, main_cpu=index0,
+//   speech_cpu=index2, speech_data=index3).
+wire ioctl_speech_cpu_sel  = (ioctl_index == 8'd2);
+wire ioctl_speech_data_sel = (ioctl_index == 8'd3);
 
 // 8035 program ROM — 2 KB
 speech_cpu_rom u_speech_cpu_rom (
@@ -232,9 +230,8 @@ speech_cpu_rom u_speech_cpu_rom (
 );
 
 // Speech data ROM — 8 KB populated (809a/810/811/812a)
-// ioctl_addr[12:0] - 13'h800 gives the 0x0000-0x1FFF offset within this ROM;
-// modular 13-bit subtraction is correct for the full 0x10800-0x127FF range.
-wire [12:0] speech_data_wr_addr = ioctl_addr[12:0] - 13'h800;
+// ioctl_index=3 resets ioctl_addr to 0 at start of transfer, so no offset needed.
+wire [12:0] speech_data_wr_addr = ioctl_addr[12:0];
 
 speech_data_rom u_speech_data_rom (
     .clk          (clk_sys),

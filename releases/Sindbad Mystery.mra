@@ -1,0 +1,118 @@
+<misterromdescription>
+    <name>Sindbad Mystery</name>
+    <region>World</region>
+    <homebrew>no</homebrew>
+    <bootleg>no</bootleg>
+    <version></version>
+    <alternative></alternative>
+    <platform>Sega G-80 Raster</platform>
+    <series>Sindbad Mystery</series>
+    <year>1983</year>
+    <manufacturer>Sega</manufacturer>
+    <category>Action</category>
+
+    <setname>sindbadm</setname>
+    <parent>sindbadm</parent>
+    <mameversion>0270</mameversion>
+    <rbf>SegaG80</rbf>
+    <about></about>
+
+    <!-- Index 1: Game ID byte — MUST appear before index 0 in MRA.
+         0x04 = Sindbad Mystery (315-5028 encrypted Z80 — NOT YET SUPPORTED). -->
+    <rom index="1"><part>04</part></rom>
+
+    <resolution>15kHz</resolution>
+    <rotation>vertical (ccw)</rotation>
+    <flip>no</flip>
+
+    <players>2 (alternating)</players>
+    <joystick>4-way</joystick>
+    <special_controls></special_controls>
+    <num_buttons>1</num_buttons>
+    <button_names>Action</button_names>
+
+    <!--
+      DIP layout (MAME segag80r.cpp:943-1010 + g80r_generic at 631-710)
+
+      Byte 0 (dip_sw0, D3D2 = SW1):
+        bit 0..1  Lives          SW1:8,7  (00=3*, 10=4, 01=5, 11=6)
+        bit 2     Cabinet        SW1:6    (0=Cocktail, 1=Upright*)
+        bit 3..6  Unused                  (default 1)
+        bit 7     Infinite Lives SW1:1    (0=On, 1=Off*)
+
+      Byte 1 (dip_sw1, D1D0 = SW2 — DIFFERENT coin table from other G80 games):
+        bit 0..3  Coin A     SW2:8..5 (0xF=1C/1C default)
+        bit 4..7  Coin B     SW2:4..1 (0xF=1C/1C default)
+
+      Factory default: FC FF
+        FC = 1111 1100 → Lives=3, Upright, Inf=Off
+        FF = 1111 1111 → 1C/1C both coins (sindbadm coin table)
+
+      *** SINDBAD MYSTERY — NOT CURRENTLY SUPPORTED ***
+
+      Sindbad Mystery uses the Sega 315-5028 encrypted Z80 CPU (same family
+      as early System 1 games). This is fundamentally different from the
+      standard G80 security chip approach:
+        - Standard G80 games: plain Z80 CPU + separate 315-00xx scramble chip
+          that mangles address lines on writes.
+        - Sindbad Mystery: the Z80 *itself* is replaced by a 315-5028 custom
+          CPU that decrypts opcodes at fetch time (XOR + swap table).
+
+      The current G80 RTL core implements only the standard Z80 + 315-00xx
+      approach. Supporting Sindbad Mystery would require either:
+        a) Pre-decrypted ROM images (MAME decrypts at init_sindbadm time), or
+        b) Implementing the 315-5028 opcode decryption in the core.
+
+      Additionally, Sindbad Mystery uses:
+        - An I8255 PPI for I/O (sindbadm_portmap), not the standard G80 port layout
+        - A separate audio Z80 + 2× SN76496 for sound
+        - A background board (G80_BACKGROUND_SINDBADM) with 4×8KB ROMs
+
+      MRA is provided for completeness / future implementation reference.
+      Loading this MRA with the current RBF will produce a non-functional result.
+    -->
+    <switches default="FC FF">
+        <dip bits="0,1"   name="Lives"        ids="3,5,4,6"/>
+        <dip bits="2"     name="Cabinet"      ids="Cocktail,Upright"/>
+        <dip bits="7"     name="Infinite Lives (Cheat)" ids="On,Off"/>
+        <dip bits="8,11"  name="Coin A"       ids="4C/1C,3C/1C,2C/1C,2C/1C 5/3,2C/1C 4/3,2C/3C,1C/1C,1C/1C 5/6,1C/1C 4/5,1C/1C 2/3,1C/1C,1C/2C,1C/3C,1C/4C,1C/5C,1C/6C"/>
+        <dip bits="12,15" name="Coin B"       ids="4C/1C,3C/1C,2C/1C,2C/1C 5/3,2C/1C 4/3,2C/3C,1C/1C,1C/1C 5/6,1C/1C 4/5,1C/1C 2/3,1C/1C,1C/2C,1C/3C,1C/4C,1C/5C,1C/6C"/>
+    </switches>
+
+    <!-- Index 0: Main CPU ROMs — 48 KB contiguous into 0x0000-0xBFFF
+         sindbadm set (MAME segag80r.cpp:1793-1814).
+         6 × 8 KB ROMs fill the full 48 KB space — no padding needed.
+         NOTE: These ROMs contain ENCRYPTED opcodes (315-5028 encryption).
+         MAME decrypts at runtime. Loading raw ROMs will not work without
+         implementing the 315-5028 decryption in the core. -->
+    <rom index="0" md5="none" zip="sindbadm.zip">
+        <part crc="51f2e51e" name="epr-5393.4d"/>
+        <part crc="d39ce2ee" name="epr-5394.4e"/>
+        <part crc="b1d15c82" name="epr-5395.4h"/>
+        <part crc="ea9d40bf" name="epr-5396.4j"/>
+        <part crc="595d16dc" name="epr-5397.4l"/>
+        <part crc="e57ff63c" name="epr-5398.4m"/>
+    </rom>
+
+    <!-- Index 1: Audio Z80 ROM + Background ROMs — NOT CONSUMED.
+         Audio: epr-5400.4a (8 KB Z80 program for 2× SN76496 sound board)
+         Background gfx1: epr-5428.9m + epr-5429.9p (2 × 8 KB)
+         Background gfx2: epr-5424.9e + epr-5425.9h + epr-5426.9j + epr-5427.9l (4 × 8 KB)
+         RTL has no Sindbad Mystery sound or background support.
+    <rom index="1" md5="none" zip="sindbadm.zip">
+        <part crc="5114f18e" name="epr-5400.4a"/>
+        <part crc="f6044a1e" name="epr-5428.9m"/>
+        <part crc="b23eca10" name="epr-5429.9p"/>
+        <part crc="4bfc2e95" name="epr-5424.9e"/>
+        <part crc="b654841a" name="epr-5425.9h"/>
+        <part crc="9de0da28" name="epr-5426.9j"/>
+        <part crc="a94f4d41" name="epr-5427.9l"/>
+    </rom>
+    -->
+
+    <!-- Index 2: Reserved for hiscore. -->
+    <rom index="2" md5="none"></rom>
+    <rom index="3"></rom>
+
+    <mratimestamp>20260510000000</mratimestamp>
+</misterromdescription>

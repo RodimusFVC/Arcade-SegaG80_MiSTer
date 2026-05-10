@@ -1,0 +1,130 @@
+<misterromdescription>
+    <name>Space Odyssey</name>
+    <region>World</region>
+    <homebrew>no</homebrew>
+    <bootleg>no</bootleg>
+    <version></version>
+    <alternative></alternative>
+    <platform>Sega G-80 Raster</platform>
+    <series>Space Odyssey</series>
+    <year>1981</year>
+    <manufacturer>Sega</manufacturer>
+    <category>Shooter</category>
+
+    <setname>spaceod</setname>
+    <parent>spaceod</parent>
+    <mameversion>0270</mameversion>
+    <rbf>SegaG80</rbf>
+    <about></about>
+
+    <!-- Index 1: Game ID byte — MUST appear before index 0 in MRA.
+         0x02 = Space Odyssey (315-0063 security chip). -->
+    <rom index="1"><part>02</part></rom>
+
+    <resolution>15kHz</resolution>
+    <rotation>vertical (ccw)</rotation>
+    <flip>no</flip>
+
+    <players>2 (alternating)</players>
+    <joystick>8-way</joystick>
+    <special_controls></special_controls>
+    <num_buttons>2</num_buttons>
+    <button_names>Fire,Bomb</button_names>
+
+    <!--
+      DIP layout (MAME segag80r.cpp:793-840 + g80r_generic at 631-710)
+
+      Byte 0 (dip_sw0, D3D2 = SW1):
+        bit 0..1  Lives          SW1:8,7  (00=3*, 10=4, 01=5, 11=6)
+        bit 2     Cabinet        SW1:6    (0=Cocktail, 1=Upright*)
+        bit 3..4  Bonus Life     SW1:5,4  (00=20000*, 10=40000, 01=60000, 11=80000)
+        bit 5..6  Unused                  (default 1)
+        bit 7     Infinite Lives SW1:1    (0=On, 1=Off*)
+
+      Byte 1 (dip_sw1, D1D0 = SW2):
+        bit 0..3  Coin A     SW2:8..5
+        bit 4..7  Coin B     SW2:4..1
+
+      Factory default: E4 33
+        E4 = 1110 0100
+             |||| ||+-- Lives bit0 = 0
+             |||| |+--- Lives bit1 = 0  → Lives = 00 = 3
+             |||| +---- Cabinet = 1     → Upright
+             |||+------ Bonus bit0 = 0
+             ||+------- Bonus bit1 = 0  → Bonus = 20000
+             |++------- Unused = 1
+             +--------- Infinite Lives = 1 → Off
+        33 = 0011 0011  → 1C/1C both coins
+
+      NOTE (1): GAME_ID blocker — current RBF has GAME_ID=0 (315-0062/ASTROB) hardwired.
+      Space Odyssey requires 315-0063 security chip (target GAME_ID=2 per SegaG80.sv).
+      Core change needed before this game can decrypt correctly.
+
+      NOTE (2): spaceod946a.prom-u6 is marked BAD_DUMP in MAME. May affect gameplay.
+
+      NOTE (3): Background board ROMs (gfx1 6×4KB, gfx2 4×4KB) not loaded —
+      RTL has no background layer support yet (G80_BACKGROUND_SPACEOD).
+    -->
+    <switches default="E4 33">
+        <dip bits="0,1"   name="Lives"        ids="3,5,4,6"/>
+        <dip bits="2"     name="Cabinet"      ids="Cocktail,Upright"/>
+        <dip bits="3,4"   name="Bonus Life"   ids="20000,60000,40000,80000"/>
+        <dip bits="7"     name="Infinite Lives (Cheat)" ids="On,Off"/>
+        <dip bits="8,11"  name="Coin A"       ids="4C/1C,3C/1C,2C/1C,1C/1C,1C/2C,1C/3C,1C/4C,1C/5C,1C/6C,2C/1C 5/3 6/4,2C/1C 4/3,1C/1C 5/6,1C/1C 4/5,1C/1C 2/3,1C/2C 5/11,1C/2C 4/9"/>
+        <dip bits="12,15" name="Coin B"       ids="4C/1C,3C/1C,2C/1C,1C/1C,1C/2C,1C/3C,1C/4C,1C/5C,1C/6C,2C/1C 5/3 6/4,2C/1C 4/3,1C/1C 5/6,1C/1C 4/5,1C/1C 2/3,1C/2C 5/11,1C/2C 4/9"/>
+    </switches>
+
+    <!-- Index 0: Main CPU ROMs — 48 KB contiguous into 0x0000-0xBFFF
+         spaceod parent set (MAME segag80r.cpp:1547-1582).
+         cpu-25 + u1..u18 = 19 × 2 KB = 38 KB at 0x0000-0x97FF.
+         Pad 0x9800-0xBFFF with 0xFF (sockets unpopulated).
+         WARNING: spaceod946a.prom-u6 is BAD_DUMP in MAME. -->
+    <rom index="0" md5="none" zip="spaceod.zip">
+        <part crc="bbae3cd1" name="so-959.cpu-25"/>
+        <part crc="b396c097" name="spod941b.prom-u1"/>
+        <part crc="e4451554" name="spod942a.prom-u2"/>
+        <part crc="0d87a8f3" name="spod943a.prom-u3"/>
+        <part crc="9c79f505" name="spod944a.prom-u4"/>
+        <part crc="375681e4" name="spod945a.prom-u5"/>
+        <part crc="4a27ff64" name="spod946a.prom-u6"/>
+        <part crc="6170de1c" name="spod947a.prom-u7"/>
+        <part crc="44fbbc87" name="spod948a.prom-u8"/>
+        <part crc="b2705596" name="spod949a.prom-u9"/>
+        <part crc="70a7a3b4" name="so-950.prom-u10"/>
+        <part crc="2bb7b5a3" name="spod951a.prom-u11"/>
+        <part crc="5bf19a12" name="so-952.prom-u12"/>
+        <part crc="8066ac83" name="so-953.prom-u13"/>
+        <part crc="44ed6a0d" name="so-954.prom-u14"/>
+        <part crc="254ca0fa" name="spod955a.prom-u15"/>
+        <part crc="97de45a9" name="so-956.prom-u16"/>
+        <part crc="1e31d118" name="spod957a.prom-u17"/>
+        <part crc="aa07e8e7" name="spod958a.prom-u18"/>
+        <!-- 0x9800-0xBFFF unpopulated on real PCB -->
+        <part repeat="0x2800">FF</part>
+    </rom>
+
+    <!-- Index 1: Background board ROMs — NOT CONSUMED.
+         Space Odyssey background generator board has two banks:
+           gfx1: epr-13..18 (6 × 4 KB = 24 KB) — tile patterns
+           gfx2: epr-09..12 (4 × 4 KB = 16 KB) — sprite/object patterns
+         RTL has no background board implementation yet.
+    <rom index="1" md5="none" zip="spaceod.zip">
+        <part crc="24a81c04" name="epr-18.bg-u10"/>
+        <part crc="6c7490c0" name="epr-17.bg-u9"/>
+        <part crc="acdf203e" name="epr-16.bg-u8"/>
+        <part crc="ae0e5d71" name="epr-15.bg-u7"/>
+        <part crc="d2ebd915" name="epr-14.bg-u6"/>
+        <part crc="74bd7f9a" name="epr-13.bg-u5"/>
+        <part crc="a87bfc0a" name="epr-09.bg-u1"/>
+        <part crc="8ce88100" name="epr-10.bg-u2"/>
+        <part crc="1bdbdab5" name="epr-11.bg-u3"/>
+        <part crc="629a4a1f" name="epr-12.bg-u4"/>
+    </rom>
+    -->
+
+    <!-- Index 2: Reserved for hiscore. -->
+    <rom index="2" md5="none"></rom>
+    <rom index="3"></rom>
+
+    <mratimestamp>20260510000000</mratimestamp>
+</misterromdescription>

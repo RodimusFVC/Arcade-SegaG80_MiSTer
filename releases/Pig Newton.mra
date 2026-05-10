@@ -1,0 +1,129 @@
+<misterromdescription>
+    <name>Pig Newton</name>
+    <region>World</region>
+    <homebrew>no</homebrew>
+    <bootleg>no</bootleg>
+    <version></version>
+    <alternative></alternative>
+    <platform>Sega G-80 Raster</platform>
+    <series>Pig Newton</series>
+    <year>1983</year>
+    <manufacturer>Sega</manufacturer>
+    <category>Action</category>
+
+    <setname>pignewt</setname>
+    <parent>pignewt</parent>
+    <mameversion>0270</mameversion>
+    <rbf>SegaG80</rbf>
+    <about></about>
+
+    <!-- Index 1: Game ID byte — MUST appear before index 0 in MRA.
+         0x02 = Pig Newton (315-0063 security chip, same as Space Odyssey). -->
+    <rom index="1"><part>02</part></rom>
+
+    <resolution>15kHz</resolution>
+    <rotation>vertical (ccw)</rotation>
+    <flip>no</flip>
+
+    <players>2 (alternating)</players>
+    <joystick>4-way</joystick>
+    <special_controls></special_controls>
+    <num_buttons>1</num_buttons>
+    <button_names>Action</button_names>
+
+    <!--
+      DIP layout (MAME segag80r.cpp:887-918 + g80r_generic at 631-710)
+
+      Byte 0 (dip_sw0, D3D2 = SW1):
+        bit 0     Cabinet        SW1:8    (0=Upright*, 1=Cocktail)
+        bit 1     Demo Sounds    SW1:7    (0=Off, 1=On*)
+        bit 2..3  Lives          SW1:6,5  (00=3*, 10=4, 01=5, 11=6)
+        bit 4..7  Unused                  (default 1)
+
+      Byte 1 (dip_sw1, D1D0 = SW2):
+        bit 0..3  Coin A     SW2:8..5
+        bit 4..7  Coin B     SW2:4..1
+
+      Factory default: F2 33
+        F2 = 1111 0010
+             |||| |||+-- Cabinet = 0      → Upright
+             |||| ||+--- Demo Sounds = 1  → On
+             |||| |+---- Lives bit0 = 0
+             |||| +----- Lives bit1 = 0   → Lives = 00 = 3
+             ++++------- Unused = 1
+        33 = 0011 0011  → 1C/1C both coins
+
+      NOTE (1): GAME_ID blocker — current RBF has GAME_ID=0 (315-0062/ASTROB) hardwired.
+      Pig Newton requires 315-0063 security chip (target GAME_ID=2, same as Space Odyssey).
+      NOTE: Hardware description in MAME comments says 315-0062, but init_pignewt()
+      calls segag80_security(63), suggesting 315-0063. Trust the code.
+      Core change needed before this game can decrypt correctly.
+
+      NOTE (2): cpu.u25 is marked BAD_DUMP in MAME. May cause unexpected behaviour.
+
+      NOTE (3): Background board ROMs (gfx1 2×8KB, gfx2 3×4KB) not loaded.
+      Pig Newton uses G80_BACKGROUND_PIGNEWT (same board as Monster Bash variant).
+      RTL has no background board support yet.
+
+      NOTE (4): Pig Newton uses the Sega Universal Sound Board (8035-based).
+      This is a different sound architecture than Astro Blaster. No audio expected.
+    -->
+    <switches default="F2 33">
+        <dip bits="0"     name="Cabinet"      ids="Upright,Cocktail"/>
+        <dip bits="1"     name="Demo Sounds"  ids="Off,On"/>
+        <dip bits="2,3"   name="Lives"        ids="3,5,4,6"/>
+        <dip bits="8,11"  name="Coin A"       ids="4C/1C,3C/1C,2C/1C,1C/1C,1C/2C,1C/3C,1C/4C,1C/5C,1C/6C,2C/1C 5/3 6/4,2C/1C 4/3,1C/1C 5/6,1C/1C 4/5,1C/1C 2/3,1C/2C 5/11,1C/2C 4/9"/>
+        <dip bits="12,15" name="Coin B"       ids="4C/1C,3C/1C,2C/1C,1C/1C,1C/2C,1C/3C,1C/4C,1C/5C,1C/6C,2C/1C 5/3 6/4,2C/1C 4/3,1C/1C 5/6,1C/1C 4/5,1C/1C 2/3,1C/2C 5/11,1C/2C 4/9"/>
+    </switches>
+
+    <!-- Index 0: Main CPU ROMs — 48 KB contiguous into 0x0000-0xBFFF
+         pignewt parent set (MAME segag80r.cpp:1721-1754).
+         cpu.u25 + u1..u21 = 22 × 2 KB = 44 KB at 0x0000-0xB7FF.
+         Pad 0xB800-0xBFFF with 0xFF (sockets unpopulated).
+         WARNING: cpu.u25 is BAD_DUMP in MAME. -->
+    <rom index="0" md5="none" zip="pignewt.zip">
+        <part crc="eccc814d" name="cpu.u25"/>
+        <part crc="fd18ed09" name="1888c.prom-u1"/>
+        <part crc="f633f5ff" name="1889c.prom-u2"/>
+        <part crc="22009d7f" name="1890c.prom-u3"/>
+        <part crc="1540a7d6" name="1891c.prom-u4"/>
+        <part crc="960385d0" name="1892c.prom-u5"/>
+        <part crc="58c5c461" name="1893c.prom-u6"/>
+        <part crc="5817a59d" name="1894c.prom-u7"/>
+        <part crc="812f67d7" name="1895c.prom-u8"/>
+        <part crc="cc0ecdd0" name="1896c.prom-u9"/>
+        <part crc="7820e93b" name="1897c.prom-u10"/>
+        <part crc="e9a10ded" name="1898c.prom-u11"/>
+        <part crc="d7ddf02b" name="1899c.prom-u12"/>
+        <part crc="8deff4e5" name="1900c.prom-u13"/>
+        <part crc="46051305" name="1901c.prom-u14"/>
+        <part crc="cb937e19" name="1902c.prom-u15"/>
+        <part crc="53239f12" name="1903c.prom-u16"/>
+        <part crc="4652cb0c" name="1913c.prom-u17"/>
+        <part crc="cb758697" name="1914c.prom-u18"/>
+        <part crc="9f3bad66" name="1915c.prom-u19"/>
+        <part crc="5bb6f61e" name="1916c.prom-u20"/>
+        <part crc="725e2c87" name="1917c.prom-u21"/>
+        <!-- 0xB800-0xBFFF unpopulated on real PCB -->
+        <part repeat="0x0800">FF</part>
+    </rom>
+
+    <!-- Index 1: Background board ROMs — NOT CONSUMED.
+         gfx1: 1904c.bg + 1905c.bg (2 × 8 KB)
+         gfx2: 1906c.bg + 1907c.bg + 1908c.bg (3 × 4 KB)
+         RTL has no background board support yet.
+    <rom index="1" md5="none" zip="pignewt.zip">
+        <part crc="e9de2c8b" name="1904c.bg"/>
+        <part crc="af7cfe0b" name="1905c.bg"/>
+        <part crc="c79d33ce" name="1906c.bg"/>
+        <part crc="bc839d3c" name="1907c.bg"/>
+        <part crc="92cb14da" name="1908c.bg"/>
+    </rom>
+    -->
+
+    <!-- Index 2: Reserved for hiscore. -->
+    <rom index="2" md5="none"></rom>
+    <rom index="3"></rom>
+
+    <mratimestamp>20260510000000</mratimestamp>
+</misterromdescription>
