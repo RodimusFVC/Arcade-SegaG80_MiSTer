@@ -132,11 +132,14 @@ module segag80_video (
     //------------------------------------------------------------------------
     wire [4:0] char_x  = h_cnt[7:3];
     wire [4:0] char_y  = v_cnt[7:3];
+    // Safety clamp - prevents out-of-bounds on v_cnt==224 during vblank transition
+    wire [4:0] safe_char_y = (char_y > 5'd27) ? 5'd27 : char_y;
+    wire [4:0] effy        = video_flip ? (5'd27 - safe_char_y) : safe_char_y;
     wire [2:0] pix_col = h_cnt[2:0];
     wire [2:0] pix_row = v_cnt[2:0];
 
     wire [4:0] flipmask5   = {5{video_flip}};
-    wire [4:0] effy        = video_flip ? (5'd27 - char_y) : char_y;
+//    wire [4:0] effy        = video_flip ? (5'd27 - char_y) : char_y;
     wire [4:0] next_char_x = char_x + 5'd1;
     wire [4:0] eff_next_x  = next_char_x ^ flipmask5;
     wire [2:0] eff_pix_col = video_flip ? ~pix_col : pix_col;
@@ -175,15 +178,28 @@ module segag80_video (
         if (pix_col_d == 3'd7) plane1_next    <= vram_scan_rd;
     end
 
-    // Transfer to CURRENT registers at the tile boundary (pix_col 7 → 0):
+// Transfer to CURRENT registers — fixed for frame boundary
     reg [7:0] tile_code_cur;
     reg [7:0] plane0_cur;
     reg [7:0] plane1_cur;
+
     always @(posedge clk) begin
-        if (ce_pix && pix_col == 3'd7) begin
-            tile_code_cur <= tile_code_next;
-            plane0_cur    <= plane0_next;
-            plane1_cur    <= plane1_next;
+        if (ce_pix) begin
+            // Normal case: end of tile
+            if (pix_col == 3'd7) begin
+                tile_code_cur <= tile_code_next;
+                plane0_cur    <= plane0_next;
+                plane1_cur    <= plane1_next;
+            end
+
+            // CRITICAL: Force update for the last visible row when starting a new line
+            // This catches the case where the pix_col==7 transfer is missed due to vblank
+            // rising edge during the last few tiles.
+            else if (char_y == 5'd27 && (pix_col == 3'd0 || pix_col == 3'd1)) begin
+                tile_code_cur <= tile_code_next;
+                plane0_cur    <= plane0_next;
+                plane1_cur    <= plane1_next;
+            end
         end
     end
 
