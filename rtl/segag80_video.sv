@@ -121,42 +121,61 @@ module segag80_video (
     //
     // We prefetch tile N+1's data during pix_col 5,6,7 of tile N (3
     // single-cycle BRAM reads). 24 clk_sys per tile, 3 reads needed —
-    // plenty of slack.
-    //
-    // Known limitation: the first character cell of each scanline (pix_col
-    // 0..7 at h_cnt=0..7) renders whatever stale data is in the _cur regs
-    // from the previous line, because prefetch for tile_x=0 would need to
-    // happen during the prior line's hblank. Artifact is ~8 pixels at the
-    // left edge — acceptable for first-light; cleaner hblank-prefetch is
-    // a later refinement.
+    // plenty of slack. The fetch position is computed as (h_cnt+8) so the
+    // schedule rolls smoothly across line boundaries: tile 0 of each row is
+    // prefetched during the last tile of the prior row, and tile 0 of the
+    // first row is prefetched during the last line of vblank.
     //------------------------------------------------------------------------
     wire [4:0] char_x  = h_cnt[7:3];
     wire [4:0] char_y  = v_cnt[7:3];
-    // Safety clamp - prevents out-of-bounds on v_cnt==224 during vblank transition
-    wire [4:0] safe_char_y = (char_y > 5'd27) ? 5'd27 : char_y;
-    wire [4:0] effy        = video_flip ? (5'd27 - safe_char_y) : safe_char_y;
     wire [2:0] pix_col = h_cnt[2:0];
     wire [2:0] pix_row = v_cnt[2:0];
 
     wire [4:0] flipmask5   = {5{video_flip}};
-//    wire [4:0] effy        = video_flip ? (5'd27 - char_y) : char_y;
-    wire [4:0] next_char_x = char_x + 5'd1;
-    wire [4:0] eff_next_x  = next_char_x ^ flipmask5;
-    wire [2:0] eff_pix_col = video_flip ? ~pix_col : pix_col;
-    wire [2:0] eff_pix_row = video_flip ? ~pix_row : pix_row;
+    wire [2:0] flipmask3   = {3{video_flip}};
 
-    // Prefetch targets for tile N+1:
+    // Display-side effective coords (for bit_sel on _cur registers).
+    wire [2:0] eff_pix_col = pix_col ^ flipmask3;
+
+    // ----- Fetch coords: 1 tile ahead of display (SNK6502-style continuous
+    // prefetch). At pix_col 5/6/7 of the displayed tile we read the data
+    // for the NEXT tile to be displayed. By computing fetch position from
+    // (h_cnt + 8), the schedule rolls over naturally at end-of-line: during
+    // the last tile of row N we are already fetching tile 0 of row N+1.
+    // This eliminates the "first tile of each row is stale" artifact and
+    // therefore the last-row mirroring symptom (last row was inheriting
+    // the previous-row last-tile data from the forced-update kludge).
+    //
+    // h_cnt wraps at HTOTAL=328, v_cnt at VTOTAL=262.
+    wire [9:0] fetch_h_raw  = {1'b0, h_cnt} + 10'd8;
+    wire       fetch_h_wrap = (fetch_h_raw >= 10'd328);
+    wire [8:0] fetch_h      = fetch_h_wrap ? (fetch_h_raw[8:0] - 9'd328) : fetch_h_raw[8:0];
+    wire [8:0] fetch_v_raw  = fetch_h_wrap ? (v_cnt + 9'd1) : v_cnt;
+    wire [8:0] fetch_v      = (fetch_v_raw >= 9'd262) ? 9'd0 : fetch_v_raw;
+
+    wire [4:0] fetch_char_x = fetch_h[7:3];
+    wire [4:0] fetch_char_y = fetch_v[7:3];
+
+    // Clamp fetch_char_y to valid display rows (0..27). When fetch points
+    // beyond row 27 (entering vblank), result is never displayed because
+    // `active` gates the output to v_cnt < 224.
+    wire [4:0] safe_fetch_char_y = (fetch_char_y > 5'd27) ? 5'd27 : fetch_char_y;
+
+    wire [4:0] eff_fetch_char_y = video_flip ? (5'd27 - safe_fetch_char_y) : safe_fetch_char_y;
+    wire [4:0] eff_fetch_char_x = fetch_char_x ^ flipmask5;
+    wire [2:0] eff_fetch_pix_row = fetch_v[2:0] ^ flipmask3;
+
+    // Prefetch targets for the next tile to be displayed:
     reg  [7:0]  tile_code_next;
     reg  [7:0]  plane0_next;
     reg  [7:0]  plane1_next;
-    wire [12:0] addr_tc_next = {3'b000, effy, eff_next_x};
-    wire [12:0] addr_p0_next = {2'b01,  tile_code_next, eff_pix_row};  // 0x0800 base
-    wire [12:0] addr_p1_next = {2'b11,  tile_code_next, eff_pix_row};  // 0x1800 base
+    wire [12:0] addr_tc_next = {3'b000, eff_fetch_char_y, eff_fetch_char_x};
+    wire [12:0] addr_p0_next = {2'b01,  tile_code_next,    eff_fetch_pix_row};  // 0x0800 base
+    wire [12:0] addr_p1_next = {2'b11,  tile_code_next,    eff_fetch_pix_row};  // 0x1800 base
     // Plane base offsets per MAME segag80r_v.cpp videoram_w (mark_dirty on offset & 0x800).
     // addr_p1 has bit 12 set → VRAM offset 0x1000, matches charlayout.
 
-    // scan_addr is now combinational (driven by pix_col schedule).
-    // Was a `reg` driven by a clocked always block — remove that.
+    // scan_addr is combinational (driven by pix_col schedule).
     always @* begin
         case (pix_col)
             3'd5:    scan_addr = addr_tc_next;
@@ -178,28 +197,19 @@ module segag80_video (
         if (pix_col_d == 3'd7) plane1_next    <= vram_scan_rd;
     end
 
-// Transfer to CURRENT registers — fixed for frame boundary
+    // Transfer NEXT -> CUR at the end of each tile, every line, unconditionally.
+    // No "forced update" special cases — the fetch coords looking 1 tile ahead
+    // mean tile 0 of every row is correctly prefetched during the previous
+    // row's last tile (or during hblank for the first row of a frame).
     reg [7:0] tile_code_cur;
     reg [7:0] plane0_cur;
     reg [7:0] plane1_cur;
 
     always @(posedge clk) begin
-        if (ce_pix) begin
-            // Normal case: end of tile
-            if (pix_col == 3'd7) begin
-                tile_code_cur <= tile_code_next;
-                plane0_cur    <= plane0_next;
-                plane1_cur    <= plane1_next;
-            end
-
-            // CRITICAL: Force update for the last visible row when starting a new line
-            // This catches the case where the pix_col==7 transfer is missed due to vblank
-            // rising edge during the last few tiles.
-            else if (char_y == 5'd27 && (pix_col == 3'd0 || pix_col == 3'd1)) begin
-                tile_code_cur <= tile_code_next;
-                plane0_cur    <= plane0_next;
-                plane1_cur    <= plane1_next;
-            end
+        if (ce_pix && pix_col == 3'd7) begin
+            tile_code_cur <= tile_code_next;
+            plane0_cur    <= plane0_next;
+            plane1_cur    <= plane1_next;
         end
     end
 
