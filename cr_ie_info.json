@@ -1,0 +1,22 @@
+{
+	"system" : {
+		"platform" : "linux64",
+		"os_name" : "\\S{PRETTY_NAME} \\r",
+		"os_version" : ""
+	},
+	"error" : {
+		"executable" : "quartus_map",
+		"comment" : "not_applicable",
+		"error_message" : "Segment Violation at 0x7f1409d47ae8",
+		"source_file" : "unknown",
+		"line" : "0",
+		"stack_trace" : "\t0x7f9480993bce: synth_vrfx + 0x193bce (_ZNK8Instance4TypeEv + 0x4)\n\t0x7f94675a8810:\n",
+		"subsystem" : "unknown"
+	},
+	"quartus" : {
+		"quartus_bits" : "64",
+		"version" : "17.0.2",
+		"build" : "602",
+		"edition" : "Lite Edition"
+	}
+}

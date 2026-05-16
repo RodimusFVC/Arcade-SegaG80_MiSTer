@@ -61,10 +61,26 @@ module sp0250 (
     reg        [5:0]  repeat_count;
     reg        [5:0]  rcount;
 
+    // History and coefficient arrays. Initialized at declaration (Cyclone V
+    // M10K supports power-on initialization) and explicitly cleared at the
+    // start of each new frame in ST_PREP. Keeping them out of the global
+    // reset path is what allows Quartus to infer M10K BRAM rather than
+    // distributed register files. Saves ~400-600 ALMs.
     reg signed [15:0] filt_F  [0:5];
     reg signed [15:0] filt_B  [0:5];
     reg signed [15:0] filt_z1 [0:5];
     reg signed [15:0] filt_z2 [0:5];
+
+    initial begin
+        filt_F[0]  = 16'sd0; filt_F[1]  = 16'sd0; filt_F[2]  = 16'sd0;
+        filt_F[3]  = 16'sd0; filt_F[4]  = 16'sd0; filt_F[5]  = 16'sd0;
+        filt_B[0]  = 16'sd0; filt_B[1]  = 16'sd0; filt_B[2]  = 16'sd0;
+        filt_B[3]  = 16'sd0; filt_B[4]  = 16'sd0; filt_B[5]  = 16'sd0;
+        filt_z1[0] = 16'sd0; filt_z1[1] = 16'sd0; filt_z1[2] = 16'sd0;
+        filt_z1[3] = 16'sd0; filt_z1[4] = 16'sd0; filt_z1[5] = 16'sd0;
+        filt_z2[0] = 16'sd0; filt_z2[1] = 16'sd0; filt_z2[2] = 16'sd0;
+        filt_z2[3] = 16'sd0; filt_z2[4] = 16'sd0; filt_z2[5] = 16'sd0;
+    end
 
     //------------------------------------------------------------------------
     // Coefficient decode.
@@ -89,6 +105,8 @@ module sp0250 (
     // Coef-load step counter: 0..13. Addresses issued in steps 0..11;
     // writebacks land 2 cycles later in steps 2..13.
     reg [3:0] coef_step;
+    reg [2:0] clear_idx;             // 0..5 for ST_CLEAR_Z sequential clear
+    reg [3:0] coef_widx;             // BRAM write index for filt_F/filt_B during load
 
     always @(*) begin
         case (coef_step)
@@ -131,6 +149,7 @@ module sp0250 (
     localparam [3:0] ST_ST5  = 4'd7;
     localparam [3:0] ST_DONE      = 4'd8;
     localparam [3:0] ST_COEF_LOAD = 4'd9;
+    localparam [3:0] ST_CLEAR_Z   = 4'd10;  // sequential z1/z2 zero (6 cycles)
     reg [3:0] state;
 
     // reg_z0: stage output feeding the next stage. On ST_ST0 entry the
@@ -147,7 +166,6 @@ module sp0250 (
         voiced ? ((pcount == 8'd0) ? amp : 16'sd0)
                : (lfsr[0] ? amp : -amp);
 
-    wire signed [15:0] stage_in  = (state == ST_ST0) ? z0_excite : reg_z0;
     wire [2:0]         stage_idx = state[2:0] - 3'd2;   // 0..5 in ST_ST0..ST_ST5
 
     //------------------------------------------------------------------------
@@ -156,16 +174,57 @@ module sp0250 (
     // C promotes to 32-bit int then truncates to int16 on assignment — mirror
     // that with a 32-bit signed sum and take the low 16 bits.
     //------------------------------------------------------------------------
-    wire signed [15:0] F_sel  = filt_F[stage_idx];
-    wire signed [15:0] B_sel  = filt_B[stage_idx];
-    wire signed [15:0] z1_sel = filt_z1[stage_idx];
-    wire signed [15:0] z2_sel = filt_z2[stage_idx];
+    //------------------------------------------------------------------------
+    // BRAM-friendly registered reads. Quartus infers M10K blocks when
+    // memory arrays are read through a registered output (clocked read).
+    //
+    // Stage timing becomes 3 cycles instead of 2:
+    //   sub=0  READ:  issue array reads; *_q available next clock
+    //   sub=1  MULT:  multiply *_q values into mul_f32/mul_b32
+    //   sub=2  WRITE: compute stage_sum, write back to filt_z1/filt_z2,
+    //                 advance state
+    //
+    // 6 stages × 3 cycles = 18 cycles per biquad cascade. Still far under
+    // the ~150-cycle sample budget at 1.56 MHz / 10 kHz.
+    //
+    // Resource target: filt_F/filt_B/filt_z1/filt_z2 → M10K BRAMs.
+    //------------------------------------------------------------------------
+    reg signed [15:0] F_q, B_q, z1_q, z2_q;
+    always @(posedge clk) begin
+        F_q  <= filt_F [stage_idx];
+        B_q  <= filt_B [stage_idx];
+        z1_q <= filt_z1[stage_idx];
+        z2_q <= filt_z2[stage_idx];
+    end
 
-    wire signed [31:0] mul_f32 = z1_sel * F_sel;
-    wire signed [31:0] mul_b32 = z2_sel * B_sel;
+    //------------------------------------------------------------------------
+    // Registered multipliers — forces DSP block inference and breaks the
+    // long combinational path. Always running; downstream gates by stage_sub.
+    //------------------------------------------------------------------------
+    reg signed [31:0] mul_f32, mul_b32;
+    reg signed [15:0] stage_in_r;
+    reg        [1:0]  stage_sub;     // 0=read, 1=mult, 2=write
+
+    always @(posedge clk or negedge reset_n) begin
+        if (!reset_n) begin
+            mul_f32    <= 32'sd0;
+            mul_b32    <= 32'sd0;
+            stage_in_r <= 16'sd0;
+        end else begin
+            if (state == ST_ST0 || state == ST_ST1 || state == ST_ST2 ||
+                state == ST_ST3 || state == ST_ST4 || state == ST_ST5) begin
+                if (stage_sub == 2'd1) begin
+                    // sub=1: multiply the values read in sub=0
+                    mul_f32    <= z1_q * F_q;
+                    mul_b32    <= z2_q * B_q;
+                    stage_in_r <= (state == ST_ST0) ? z0_excite : reg_z0;
+                end
+            end
+        end
+    end
 
     wire signed [31:0] stage_sum32 =
-        {{16{stage_in[15]}}, stage_in} + (mul_f32 >>> 8) + (mul_b32 >>> 9);
+        {{16{stage_in_r[15]}}, stage_in_r} + (mul_f32 >>> 8) + (mul_b32 >>> 9);
 
     wire signed [15:0] stage_out = stage_sum32[15:0];
 
@@ -175,9 +234,13 @@ module sp0250 (
     // the final <<7 is our FPGA-side scale for the mix bus.
     //------------------------------------------------------------------------
     wire signed [15:0] z_sr6 = reg_z0 >>> 6;
+    // 7-bit signed range is -64..+63. `-7'sd64` triggers a constant-overflow
+    // warning (7'sd64=64 doesn't fit in 7-bit signed; wraps to -64, negate
+    // wraps again) — value happens to land right by accident. Use 8-bit
+    // literals and let Quartus narrow on assignment to the 7-bit wire.
     wire signed [6:0]  dac_clamped =
-        (z_sr6 < -16'sd64) ? -7'sd64 :
-        (z_sr6 >  16'sd63) ?  7'sd63 :
+        (z_sr6 < -16'sd64) ? -8'sd64 :
+        (z_sr6 >  16'sd63) ?  8'sd63 :
                               z_sr6[6:0];
     wire signed [13:0] audio_next = {dac_clamped, 7'b0};
 
@@ -203,15 +266,12 @@ module sp0250 (
             sample_divider  <= 8'd155;
             state           <= ST_IDLE;
             coef_step       <= 4'd0;
+            clear_idx       <= 3'd0;
+            coef_widx       <= 4'd0;
+            stage_sub       <= 2'd0;
             reg_z0          <= 16'sd0;
             audio_reg       <= 14'sd0;
             audio_valid_reg <= 1'b0;
-            for (i = 0; i < 6; i = i + 1) begin
-                filt_F[i]  <= 16'sd0;
-                filt_B[i]  <= 16'sd0;
-                filt_z1[i] <= 16'sd0;
-                filt_z2[i] <= 16'sd0;
-            end
             for (i = 0; i < 15; i = i + 1) begin
                 fifo[i] <= 8'd0;
             end
@@ -248,14 +308,9 @@ module sp0250 (
                             voiced       <= fifo[8][6];
                             pcount       <= 8'd0;
                             rcount       <= 6'd0;
-                            for (i = 0; i < 6; i = i + 1) begin
-                                filt_z1[i] <= 16'sd0;
-                                filt_z2[i] <= 16'sd0;
-                            end
-                            coef_step    <= 4'd0;
-                            // LFSR + ST_ST0 transition happen at the end of
-                            // ST_COEF_LOAD so timing per frame is preserved.
-                            state        <= ST_COEF_LOAD;
+                            // Sequential z1/z2 zero (BRAM-friendly).
+                            clear_idx    <= 3'd0;
+                            state        <= ST_CLEAR_Z;
                         end else begin
                             // Starved of input → "NOP" with repeat=1, pitch
                             // unchanged (cpcwiki SP0256 measured-timings ref
@@ -264,12 +319,28 @@ module sp0250 (
                             pcount       <= 8'd0;
                             rcount       <= 6'd0;
                             lfsr         <= {lfsr[0] ^ lfsr[1], lfsr[14:1]};
+                            stage_sub    <= 2'd0;
                             state        <= ST_ST0;
                         end
                     end else begin
                         // Repeat ongoing — reuse prior filter state.
-                        lfsr  <= {lfsr[0] ^ lfsr[1], lfsr[14:1]};
-                        state <= ST_ST0;
+                        lfsr      <= {lfsr[0] ^ lfsr[1], lfsr[14:1]};
+                        stage_sub <= 2'd0;
+                        state     <= ST_ST0;
+                    end
+                end
+
+                ST_CLEAR_Z: begin
+                    // Clear filt_z1[clear_idx] and filt_z2[clear_idx] over 6
+                    // cycles. Single write port per BRAM — Quartus-friendly.
+                    filt_z1[clear_idx] <= 16'sd0;
+                    filt_z2[clear_idx] <= 16'sd0;
+                    if (clear_idx == 3'd5) begin
+                        coef_step <= 4'd0;
+                        coef_widx <= 4'd0;
+                        state     <= ST_COEF_LOAD;
+                    end else begin
+                        clear_idx <= clear_idx + 3'd1;
                     end
                 end
 
@@ -278,36 +349,49 @@ module sp0250 (
                     // ationally from coef_step (see addr mux above). ROM has
                     // 2-cycle read latency, so addresses issued in steps 0..11
                     // yield writebacks in steps 2..13.
+                    //
+                    // BRAM-friendly: a single index drives the write port for
+                    // each array. The pattern B0,F0,B1,F1,...,B5,F5 means the
+                    // index alternates B/F on each step, with the array index
+                    // advancing every two steps. coef_widx (0..5) tracks the
+                    // array index; coef_step[0] selects F vs B.
                     coef_step <= coef_step + 4'd1;
-                    case (coef_step)
-                        4'd2:  filt_B[0] <= coef_val;
-                        4'd3:  filt_F[0] <= coef_val;
-                        4'd4:  filt_B[1] <= coef_val;
-                        4'd5:  filt_F[1] <= coef_val;
-                        4'd6:  filt_B[2] <= coef_val;
-                        4'd7:  filt_F[2] <= coef_val;
-                        4'd8:  filt_B[3] <= coef_val;
-                        4'd9:  filt_F[3] <= coef_val;
-                        4'd10: filt_B[4] <= coef_val;
-                        4'd11: filt_F[4] <= coef_val;
-                        4'd12: filt_B[5] <= coef_val;
-                        4'd13: filt_F[5] <= coef_val;
-                        default: ;
-                    endcase
+                    if (coef_step >= 4'd2 && coef_step <= 4'd13) begin
+                        // step 2 -> B[0], step 3 -> F[0], step 4 -> B[1], ...
+                        if (coef_step[0])
+                            filt_F[coef_widx] <= coef_val;
+                        else
+                            filt_B[coef_widx] <= coef_val;
+                        // After F write (odd step), advance to next array idx
+                        if (coef_step[0])
+                            coef_widx <= coef_widx + 4'd1;
+                    end
                     if (coef_step == 4'd13) begin
                         // Last writeback — clear FIFO, advance LFSR, dispatch.
-                        fifo_pos <= 4'd0;
-                        lfsr     <= {lfsr[0] ^ lfsr[1], lfsr[14:1]};
-                        state    <= ST_ST0;
+                        fifo_pos  <= 4'd0;
+                        lfsr      <= {lfsr[0] ^ lfsr[1], lfsr[14:1]};
+                        stage_sub <= 2'd0;
+                        state     <= ST_ST0;
                     end
                 end
 
                 ST_ST0, ST_ST1, ST_ST2, ST_ST3, ST_ST4, ST_ST5: begin
-                    reg_z0             <= stage_out;
-                    filt_z2[stage_idx] <= filt_z1[stage_idx];
-                    filt_z1[stage_idx] <= stage_out;
-                    state              <= (state == ST_ST5) ? ST_DONE
-                                                            : state + 4'd1;
+                    // 3-cycle stage:
+                    //   sub=0 READ:  array reads in flight; *_q valid next clk
+                    //   sub=1 MULT:  multipliers latch (separate always block)
+                    //   sub=2 WRITE: stage_sum, writeback z1/z2, advance state
+                    case (stage_sub)
+                        2'd0: stage_sub <= 2'd1;
+                        2'd1: stage_sub <= 2'd2;
+                        2'd2: begin
+                            reg_z0             <= stage_out;
+                            filt_z2[stage_idx] <= z1_q;     // old z1 -> z2
+                            filt_z1[stage_idx] <= stage_out;
+                            stage_sub          <= 2'd0;
+                            state              <= (state == ST_ST5) ? ST_DONE
+                                                                    : state + 4'd1;
+                        end
+                    endcase
                 end
 
                 ST_DONE: begin
