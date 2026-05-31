@@ -208,18 +208,29 @@ assign AUDIO_S = 1;
 assign AUDIO_MIX = 0;
 
 assign LED_DISK  = 0;
-assign LED_POWER = 0;
-assign LED_USER  = ioctl_download;
+// DIAG-REVERT-2026-05-28: repurpose status LEDs to show the speech command path
+// (driven from g80_inst below). LED_USER = command SERVICED (8035 acked via the
+// P1[7] pulse); LED_POWER[0] = command SENT (host set T0). On a coin-up / known
+// speech trigger:  neither = not sent (port/host);  sent-only = 8035 not
+// servicing (stuck);  both = serviced -> bug is downstream. Each stretched ~0.2s.
+// Revert: delete the dbg_speech_* wire + the two DIAG assigns, uncomment the two
+// originals, and drop the g80_inst dbg ports + segaspeech/SegaG80 dbg ports.
+wire dbg_speech_sent, dbg_speech_ack;
+// assign LED_POWER = 0;
+// assign LED_USER  = ioctl_download;
+assign LED_POWER = {1'b0, dbg_speech_sent};   // DIAG: bit0 = speech command sent
+assign LED_USER  = dbg_speech_ack;            // DIAG: 8035 serviced a command
 assign BUTTONS = 0;
 
 ///////////////////////////////////////////////////
 
 wire [1:0] ar = status[14:13];
 
-// Vertical (status[12]=0): 14:16 → 7:8 → 224:256 active area of G-80 raster.
-// Horizontal (status[12]=1): 16:14 → rotated.
-assign VIDEO_ARX = status[12] ? ((!ar) ? 12'd16 : (ar - 1'd1)) : ((!ar) ? 12'd14 : (ar - 1'd1));
-assign VIDEO_ARY = status[12] ? ((!ar) ? 12'd14 : 12'd0) : ((!ar) ? 12'd16 : 12'd0);
+// Monitor aspect ratio (4:3 tube), NOT the framebuffer pixel ratio.
+// Old values were 14:16/16:14 (224:256 active-area pixel count) — that looked fat.
+// Vertical (status[12]=0): 3:4. Horizontal (status[12]=1): 4:3.
+assign VIDEO_ARX = status[12] ? ((!ar) ? 12'd4 : (ar - 1'd1)) : ((!ar) ? 12'd3 : (ar - 1'd1));
+assign VIDEO_ARY = status[12] ? ((!ar) ? 12'd3 : 12'd0) : ((!ar) ? 12'd4 : 12'd0);
 
 `include "build_id.v"
 localparam CONF_STR = {
@@ -338,7 +349,14 @@ assign cfg_write = 0;
 assign cfg_address = 0;
 assign cfg_data = 0;
 
-wire reset = RESET | status[0] | buttons[1];
+// FIX-2026-05-25: include ioctl_download and PLL lock in the reset chain.
+// Per JF Juno First 2026-05-25 — the prior "T48 confirmed as the fault"
+// diagnosis for SegaG80 speech (Astro Blaster) may actually be the same
+// cold-boot ordering bug fixed on JF: the 8035 was deasserting reset while
+// its program ROM was still streaming into BRAM, fetching garbage opcodes,
+// latching into a bad state from which it never recovered. See
+// Common-Pitfalls/Core reset must include ioctl_download.md.
+wire reset = RESET | status[0] | buttons[1] | ioctl_download | ~locked;
 
 ///////////////////         Keyboard           //////////////////
 
@@ -545,7 +563,11 @@ SegaG80 g80_inst
 	.hs_address  (hs_address),
 	.hs_data_in  (hs_data_in),
 	.hs_data_out (hs_data_out),
-	.hs_write    (hs_write_enable)
+	.hs_write    (hs_write_enable),
+
+	// DIAG-REVERT-2026-05-28: speech command-path activity -> status LEDs
+	.dbg_speech_sent (dbg_speech_sent),
+	.dbg_speech_ack  (dbg_speech_ack)
 );
 
 // HISCORE SYSTEM

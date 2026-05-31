@@ -51,7 +51,11 @@ module SegaG80 (
     input         [15:0] hs_address,
     input          [7:0] hs_data_in,
     output         [7:0] hs_data_out,
-    input                hs_write
+    input                hs_write,
+
+    // DIAG-REVERT-2026-05-28: speech command-path activity (-> parent status LEDs)
+    output               dbg_speech_sent,
+    output               dbg_speech_ack
 );
 
 //----------------------------------------------------------------------------
@@ -254,7 +258,10 @@ segaspeech u_segaspeech (
     .rom_speech_addr  (speech_data_addr),
     .rom_speech_data  (speech_data_data),
     .audio_out        (speech_sample),
-    .audio_valid      (speech_valid)
+    .audio_valid      (speech_valid),
+    // DIAG-REVERT-2026-05-28: command-path activity LEDs
+    .dbg_cmd_sent     (dbg_speech_sent),
+    .dbg_cmd_ack      (dbg_speech_ack)
 );
 
 //----------------------------------------------------------------------------

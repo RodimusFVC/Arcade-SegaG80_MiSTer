@@ -19,30 +19,18 @@ set_global_assignment -name SYSTEMVERILOG_FILE rtl/ram_rom/segag80_rom.sv
 set_global_assignment -name VHDL_FILE          rtl/ram_rom/dpram_dc.vhd
 set_global_assignment -name VHDL_FILE          rtl/ram_rom/spram.vhd
 
-# --- MCS-48 / 8035 core (T48 v1.4, vendored from https://github.com/devsaurus/t48, zip download) ---
-set_global_assignment -name VHDL_FILE          rtl/sound/t48/rtl/vhdl/t48_pack-p.vhd
-set_global_assignment -name VHDL_FILE          rtl/sound/t48/rtl/vhdl/alu_pack-p.vhd
-set_global_assignment -name VHDL_FILE          rtl/sound/t48/rtl/vhdl/cond_branch_pack-p.vhd
-set_global_assignment -name VHDL_FILE          rtl/sound/t48/rtl/vhdl/decoder_pack-p.vhd
-set_global_assignment -name VHDL_FILE          rtl/sound/t48/rtl/vhdl/dmem_ctrl_pack-p.vhd
-set_global_assignment -name VHDL_FILE          rtl/sound/t48/rtl/vhdl/pmem_ctrl_pack-p.vhd
-set_global_assignment -name VHDL_FILE          rtl/sound/t48/rtl/vhdl/psw.vhd
-set_global_assignment -name VHDL_FILE          rtl/sound/t48/rtl/vhdl/alu.vhd
-set_global_assignment -name VHDL_FILE          rtl/sound/t48/rtl/vhdl/bus_mux.vhd
-set_global_assignment -name VHDL_FILE          rtl/sound/t48/rtl/vhdl/clock_ctrl.vhd
-set_global_assignment -name VHDL_FILE          rtl/sound/t48/rtl/vhdl/cond_branch.vhd
-set_global_assignment -name VHDL_FILE          rtl/sound/t48/rtl/vhdl/db_bus.vhd
-set_global_assignment -name VHDL_FILE          rtl/sound/t48/rtl/vhdl/decoder.vhd
-set_global_assignment -name VHDL_FILE          rtl/sound/t48/rtl/vhdl/dmem_ctrl.vhd
-set_global_assignment -name VHDL_FILE          rtl/sound/t48/rtl/vhdl/int.vhd
-set_global_assignment -name VHDL_FILE          rtl/sound/t48/rtl/vhdl/p1.vhd
-set_global_assignment -name VHDL_FILE          rtl/sound/t48/rtl/vhdl/p2.vhd
-set_global_assignment -name VHDL_FILE          rtl/sound/t48/rtl/vhdl/pmem_ctrl.vhd
-set_global_assignment -name VHDL_FILE          rtl/sound/t48/rtl/vhdl/timer.vhd
-set_global_assignment -name VHDL_FILE          rtl/sound/t48/rtl/vhdl/t48_core.vhd
-set_global_assignment -name VHDL_FILE          rtl/sound/t48/rtl/vhdl/system/generic_ram_ena.vhd
-# set_global_assignment -name VHDL_FILE          rtl/sound/t48/rtl/vhdl/system/t8039_notri.vhd
-# set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/t48/t48_smoketest.sv
+# --- MCS-48 / 8035 core (T48 v1.4, SVN r295) + Sega 8035 toplevel wrapper -----
+# MIGRATE-2026-05-28 (Juno First playbook): switched from the locally-refactored
+# rtl/sound/t48/ tree to the pristine rtl/sound/i8039/ tree -- same T48 v1.4 /
+# SVN r295, but the component-instantiation source that Juno First already ships
+# and runs on this toolchain. Pulled in as one QIP include exactly like JF
+# (jf_sound.qip). This drops the LAST reference to rtl/sound/t48/, so that whole
+# tree is now safe to delete.
+#   NOTE: the i8039/ tree REQUIRES t48_comp_pack-p.vhd (component decls) -- the
+#   old t48/ build omitted it only because that tree used direct-entity
+#   instantiation. i8039.qip lists it. segaspeech.sv instantiates
+#   t8039_notri_extrom (8035, 64-byte RAM).
+set_global_assignment -name QIP_FILE rtl/sound/i8039/i8039.qip
 
 # --- SP0250 LPC speech core (port of MAME sp0250.cpp, BSD-3-Clause) ---
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/sp0250/sp0250_coef_rom.sv

@@ -7,10 +7,10 @@
 	"error" : {
 		"executable" : "quartus_map",
 		"comment" : "not_applicable",
-		"error_message" : "Segment Violation at 0x7f1409d47ae8",
+		"error_message" : "Segment Violation at 0x7f191702cc80",
 		"source_file" : "unknown",
 		"line" : "0",
-		"stack_trace" : "\t0x7f9480993bce: synth_vrfx + 0x193bce (_ZNK8Instance4TypeEv + 0x4)\n\t0x7f94675a8810:\n",
+		"stack_trace" : "\t0x7f494cd3a6b0: db_cdb_sgate + 0x13a6b0 (_ZNK15CDB_SGATE_ITERM13get_port_typeEv + 0)\n",
 		"subsystem" : "unknown"
 	},
 	"quartus" : {
