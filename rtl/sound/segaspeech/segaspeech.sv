@@ -28,7 +28,9 @@
 //============================================================================
 
 module segaspeech (
-    input                clk,                 // 20 MHz system clock
+    input                clk,                 // clk_sys = 15.468480 MHz (rtl/pll/pll_0002.v).
+                                              // NOT 20 MHz — that stale comment produced the
+                                              // wrong CE divisors; see SPEED-FIX-2026-07-26.
     input                reset_n,
     input        [7:0]   data_w,
     input                data_we,
@@ -70,13 +72,33 @@ module segaspeech (
     // For exact pitch, replace with a fractional clock-enable generator
     // (accumulator-based) producing 3.12 MHz and 1.56 MHz pulses.
     //------------------------------------------------------------------------
-    reg [3:0] ce_div;
+    // SPEED-FIX-2026-07-26 — speech played at 62% speed (HW-confirmed slow 2026-07-26).
+    // The old /8 and /16 were computed against a "20 MHz system clock" (see the port
+    // comment above, which was WRONG). clk_sys is actually the PLL's
+    // **15.468480 MHz** (rtl/pll/pll_0002.v output_clock_frequency0), so:
+    //     /8  = 1.9336 MHz vs 3.12 MHz nominal = 62%
+    //     /16 = 0.9668 MHz vs 1.56 MHz nominal = 62%
+    // Correct divisors from 15.468480 MHz are /5 and /10:
+    //     /5  = 3.093696 MHz vs 3.12 MHz  = 99.16%
+    //     /10 = 1.546848 MHz vs 1.56 MHz  = 99.16%   (0.84% flat, inaudible)
+    // Both the 8035 and the SP0250 run off the same 3.12 MHz XTAL on the real board
+    // (MAME segaspeech.cpp:30 SPEECH_MASTER_CLOCK 3120000, used for I8035 AND SP0250),
+    // and ROMCLOCK is XTAL/2 — the 2:1 ratio is preserved exactly here.
+    // ORIGINAL:
+    // reg [3:0] ce_div;
+    // always @(posedge clk or negedge reset_n) begin
+    //     if (!reset_n) ce_div <= 4'd0;
+    //     else          ce_div <= ce_div + 4'd1;
+    // end
+    // wire ce_3_12m     = (ce_div[2:0] == 3'd0);   // /8  ≈ 2.5 MHz
+    // wire ce_rom_1_56m = (ce_div      == 4'd0);   // /16 ≈ 1.25 MHz
+    reg [3:0] ce_div;                                // mod-10
     always @(posedge clk or negedge reset_n) begin
         if (!reset_n) ce_div <= 4'd0;
-        else          ce_div <= ce_div + 4'd1;
+        else          ce_div <= (ce_div == 4'd9) ? 4'd0 : ce_div + 4'd1;
     end
-    wire ce_3_12m     = (ce_div[2:0] == 3'd0);   // /8  ≈ 2.5 MHz
-    wire ce_rom_1_56m = (ce_div      == 4'd0);   // /16 ≈ 1.25 MHz
+    wire ce_3_12m     = (ce_div == 4'd0) || (ce_div == 4'd5);  // /5  = 3.0937 MHz
+    wire ce_rom_1_56m = (ce_div == 4'd0);                      // /10 = 1.5468 MHz
 
     //------------------------------------------------------------------------
     // Host-side latch with T0/INT decode (MAME delayed_speech_w)
@@ -171,7 +193,20 @@ module segaspeech (
         if (!reset_n) wr_n_prev <= 1'b1;
         else          wr_n_prev <= wr_n_o;
     end
-    wire sp_wr = wr_n_prev & ~wr_n_o;     // WR_n falling edge = strobe
+    // FIX-2026-07-26 — CO-SIM PROVEN. Was the FALLING edge, which samples the ADDRESS
+    // phase: MOVX @Rn,A drives R0 (the frame-buffer pointer, 0x23-0x31) onto the bus
+    // first, then A (the data). The old strobe captured R0 every time, so the SP0250 was
+    // fed a stream of RAM POINTERS instead of LPC frames -- the "modem noise" symptom.
+    // Note the comment block above always SAID rising edge; only the code disagreed.
+    //
+    // Proof (verilator/speech_full, real segaspeech + GHDL-converted i8039 + real ROMs,
+    // both edges captured in ONE run, diffed against MAME's known-good mame_stream.bin):
+    //   WR_n falling: 23 22 22 29 28 28 27 26 26 25 24 24 24 21 20   <- RAM addresses
+    //   WR_n rising : 00 00 00 00 00 FF 00 00 01 00 00 00 00 00 00   <- 15/15 MATCH
+    //   MAME        : 00 00 00 00 00 FF 00 00 01 00 00 00 00 00 00
+    // ORIGINAL:
+    // wire sp_wr = wr_n_prev & ~wr_n_o;     // WR_n falling edge = strobe
+    wire sp_wr = ~wr_n_prev & wr_n_o;     // WR_n RISING edge = data phase valid
 
     wire               sp_drq;
     wire signed [13:0] sp_audio;
