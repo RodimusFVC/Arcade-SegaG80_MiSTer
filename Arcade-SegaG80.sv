@@ -569,6 +569,7 @@ SegaG80 g80_inst
 
 	.pause       (pause_cpu),
 
+
 	// Hiscore
 	.hs_address  (hs_address),
 	.hs_data_in  (hs_data_in),
@@ -591,25 +592,45 @@ wire hs_access_write;
 wire hs_pause;
 wire hs_configured;
 
-hiscore #(
-	.HS_ADDRESSWIDTH(16),
-	.CFG_ADDRESSWIDTH(3),
-	.CFG_LENGTHWIDTH(2)
-) hi (
-	.*,
-	.clk(CLK_SYS),
-	.paused(pause_cpu),
-	.autosave(status[27]),
-	.ram_address(hs_address),
-	.data_from_ram(hs_data_out),
-	.data_to_ram(hs_data_in),
-	.data_from_hps(ioctl_dout),
-	.data_to_hps(ioctl_din),
-	.ram_write(hs_write_enable),
-	.ram_intent_read(hs_access_read),
-	.ram_intent_write(hs_access_write),
-	.pause_cpu(hs_pause),
-	.configured(hs_configured)
-);
+// HISCORE-DISABLED-2026-07-26 ------------------------------------------------
+// Disabled at the user's request. It has caused problems before, and the MRA's
+// hiscore config (index 5) is EMPTY ("fill in once hiscore addresses are
+// mapped"), so this module is running UNCONFIGURED. It is a live suspect for
+// the progressive slowdown: it can assert pause_cpu (throttling the whole core,
+// game AND audio, since sound is CPU-triggered) and it writes straight into
+// mainram port B via hs_write_enable, so an unconfigured address could also be
+// corrupting game RAM.
+// TO RESTORE: delete the tie-offs below, uncomment the instantiation, and fill
+// in MRA index 5 with a real hiscore config FIRST.
+assign hs_pause        = 1'b0;
+assign hs_write_enable = 1'b0;
+assign hs_access_read  = 1'b0;
+assign hs_access_write = 1'b0;
+assign hs_configured   = 1'b0;   // ~hs_configured masks the OSD hiscore entry
+assign hs_address      = 16'd0;
+assign hs_data_in      = 8'd0;
+assign ioctl_din       = 8'd0;   // was driven by hiscore .data_to_hps
+// ORIGINAL:
+// hiscore #(
+// 	.HS_ADDRESSWIDTH(16),
+// 	.CFG_ADDRESSWIDTH(3),
+// 	.CFG_LENGTHWIDTH(2)
+// ) hi (
+// 	.*,
+// 	.clk(CLK_SYS),
+// 	.paused(pause_cpu),
+// 	.autosave(status[27]),
+// 	.ram_address(hs_address),
+// 	.data_from_ram(hs_data_out),
+// 	.data_to_ram(hs_data_in),
+// 	.data_from_hps(ioctl_dout),
+// 	.data_to_hps(ioctl_din),
+// 	.ram_write(hs_write_enable),
+// 	.ram_intent_read(hs_access_read),
+// 	.ram_intent_write(hs_access_write),
+// 	.pause_cpu(hs_pause),
+// 	.configured(hs_configured)
+// );
+// ---------------------------------------------------------------------------
 
 endmodule

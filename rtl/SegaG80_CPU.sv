@@ -122,7 +122,38 @@ always @(posedge clk_sys) begin
     mreq_d <= mreq_n;
     iorq_d <= iorq_n;
 end
-wire access_start = (mreq_d & ~mreq_n) | (iorq_d & ~iorq_n);
+// WAITSTATE-FIX-2026-07-26 — we were charging wait states on things MAME doesn't.
+// MAME installs taps on AS_PROGRAM read, AS_PROGRAM write and AS_OPCODES read only
+// (segag80r.cpp init_waitstates) — i.e. real MEMORY accesses. There is NO iospace
+// tap, and a Z80 M1 REFRESH cycle asserts MREQ but is a DRAM refresh, not a memory
+// access, so MAME charges nothing for either.
+//
+// MEASURED before the fix (verilator/scramble/wait_main.cpp, real ROM, 40M clks):
+//   ours 2,072,429 charges vs MAME-equivalent 1,349,139  = 1.54x
+//   excess = 722,800 M1 refresh cycles + 490 I/O accesses
+//   => ~35% of Z80 time burned on waits MAME never applies.
+// That deficit is proportional to workload: invisible when the game is light, but
+// once per-frame work exceeds the budget the core cannot finish a frame and
+// everything (including audio) drags -- and it does not recover while the load
+// stays high. Matches the HW report of a hard slowdown from mid-wave-3 onward that
+// MAME does not exhibit.
+// Detect the access by MREQ asserted TOGETHER WITH RD or WR, not by the MREQ edge:
+//   opcode fetch / mem read : MREQ+RD assert together        -> counted
+//   mem write               : WR asserts a cycle AFTER MREQ  -> counted (an MREQ-edge
+//                             test would MISS every write)
+//   M1 refresh              : MREQ low but RD and WR both high -> correctly ignored
+//   I/O                     : IORQ, never MREQ                 -> correctly ignored
+// (`rfsh_n` is NOT usable as the qualifier — measured LOW 100% of the time on this
+//  T80 build, which silently zeroed access_start when tried. Verify, don't assume.)
+// ORIGINAL:
+// wire access_start = (mreq_d & ~mreq_n) | (iorq_d & ~iorq_n);
+wire mem_acc_now = ~mreq_n & (~rd_n | ~wr_n);
+reg  mem_acc_d;
+always @(posedge clk_sys or posedge reset) begin
+    if (reset) mem_acc_d <= 1'b0;
+    else       mem_acc_d <= mem_acc_now;
+end
+wire access_start = mem_acc_now & ~mem_acc_d;
 
 always @(posedge clk_sys or posedge reset) begin
     if (reset)                  ws_cnt <= 2'd0;
