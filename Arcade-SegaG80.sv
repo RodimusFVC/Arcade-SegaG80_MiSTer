@@ -413,7 +413,13 @@ wire m_down2    = btn_down    | joystick_1[2];
 wire m_left2    = btn_left    | joystick_1[1];
 wire m_right2   = btn_right   | joystick_1[0];
 wire m_fire2    = btn_fire    | joystick_1[4];
-wire m_fire2b   = btn_fire2   | joystick_0[5];
+// P2-JOY-FIX-2026-07-26: read P2's controller, not P1's. Every sibling P2 line
+// (m_up2/m_down2/m_left2/m_right2/m_fire2) uses joystick_1; this one said
+// joystick_0, so P1's button 2 drove BOTH the P1 warp bit (D5D4 b7, active-low)
+// and the P2 cocktail warp bit (FC b4, active-HIGH) at once.
+// ORIGINAL:
+// wire m_fire2b   = btn_fire2   | joystick_0[5];
+wire m_fire2b   = btn_fire2   | joystick_1[5];
 
 //Start/coin/service
 wire m_start1   = btn_1p_start | joystick_0[6];

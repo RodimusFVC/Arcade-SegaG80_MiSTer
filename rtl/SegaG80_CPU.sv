@@ -200,13 +200,48 @@ assign dout_o = cpu_dout;
 //   On every M1 opcode fetch: latch PC if the fetched byte is 0x32
 //   (LD (nn),A), otherwise set sentinel 0xFFFF.
 //
-//   MAME updates m_scrambled_write_pc ONLY inside g80r_opcode_r and never
-//   clears it after the write — it is simply overwritten by the next
-//   opcode fetch. We match that lifecycle so decrypt_addr stays valid
-//   across the entire MW cycle (and any future multi-tick WR_n timing).
+//   SCRAMBLE-ONESHOT-FIX-2026-07-26 — CO-SIM PROVEN.
+//   The old comment here claimed "MAME ... never clears it after the write — it
+//   is simply overwritten by the next opcode fetch." **That is wrong.** MAME
+//   clears it inside decrypt_offset (segag80r.cpp:412-421):
+//       offs_t pc = m_scrambled_write_pc;
+//       m_scrambled_write_pc = 0xffff;      <-- ONE-SHOT, consumed on use
+//   i.e. exactly ONE write is scrambled per $32 fetch. Whoever wrote the
+//   original read g80r_opcode_r and missed the clear in the other function.
+//
+//   Why it mattered: the Z80's INTA cycle is M1+IORQ, so mreq_n is HIGH and
+//   m1_read below never fires — the latch stayed armed straight through the
+//   interrupt acknowledge into the two stack-push WRITES that follow. Those
+//   pushes got their low address byte munged, so the return address was stored
+//   somewhere else; RETI then popped garbage and the CPU jumped into the weeds.
+//   Symptoms: random crashes, spurious screen flip (video_flip is CPU-written),
+//   corrupted game state. Frequency depends on an IRQ landing right after an
+//   LD (nnnn),A, which is why it looked random.
+//
+//   MEASURED (verilator/scramble, real T80s via GHDL + this latch + real
+//   segag80_decrypt, vs MAME's rule): 149 interrupts, 298 stack writes,
+//   **92 mismatches** e.g. push raw=C9FF -> ours C9DF, MAME C9FF.
+//
+//   The clear is taken on the FALLING edge of the write, not the first cycle of
+//   it: the address must stay decrypted for the whole MW cycle or a multi-tick
+//   write would split across two addresses.
+//   (Faithfulness note: MAME consumes only on RAM/VRAM writes — decrypt_offset
+//   is called from mainram_w/vidram_w/usb_ram_w — so the consume is gated to
+//   the same address ranges rather than any memory write.)
 //----------------------------------------------------------------------------
 reg [15:0] scrambled_write_pc;
 wire       m1_read = ~m1_n & ~rd_n & ~mreq_n;
+
+// One-shot consume, gated to the ranges MAME routes through decrypt_offset.
+wire mem_wr_now  = ~mreq_n & ~wr_n;
+wire wr_decodes  = ((cpu_addr >= 16'hC800) & (cpu_addr <= 16'hCFFF))
+                 | (cpu_addr >= 16'hE000);
+reg  mem_wr_d;
+always @(posedge clk_sys or posedge reset) begin
+    if (reset) mem_wr_d <= 1'b0;
+    else       mem_wr_d <= mem_wr_now & wr_decodes;
+end
+wire write_ended = mem_wr_d & ~(mem_wr_now & wr_decodes);
 
 always @(posedge clk_sys or posedge reset) begin
     if (reset)
@@ -217,6 +252,8 @@ always @(posedge clk_sys or posedge reset) begin
         else
             scrambled_write_pc <= 16'hFFFF;
     end
+    else if (write_ended)
+        scrambled_write_pc <= 16'hFFFF;   // consumed, per MAME decrypt_offset
 end
 
 //----------------------------------------------------------------------------
