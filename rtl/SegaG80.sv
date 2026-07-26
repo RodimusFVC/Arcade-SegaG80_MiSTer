@@ -27,6 +27,10 @@ module SegaG80 (
 
     input                service,      // edge triggers Z80 NMI
 
+    // CRT Flip override (status[22] at the Arcade-SegaG80.sv level). XOR'd
+    // with the game's native video_flip cocktail bit in segag80_video.sv.
+    input                flip_vertical,
+
     // DIP banks (active-LOW per MAME)
     input          [7:0] dip_sw0, dip_sw1, dip_sw2, dip_sw3,
 
@@ -190,6 +194,7 @@ segag80_video video_inst (
     .cpu_wr           (cpu_vram_wr),
     .video_control_1  (vc1),
     .video_flip       (vflip),
+    .flip_vertical    (flip_vertical),
     .ce_pix           (ce_pix_i),
     .h_cnt            (vtg_h),
     .v_cnt            (vtg_v),

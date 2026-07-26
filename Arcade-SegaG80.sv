@@ -237,6 +237,8 @@ localparam CONF_STR = {
 	"A.SEGAG80;;",
 	"ODE,Aspect Ratio,Original,Full screen,[ARC1],[ARC2];",
 	"OC,Orientation,Vert,Horz;",
+	"OB,HDMI Flip,Off,On;",
+	"OM,CRT Flip,Off,On;",
 	"OFH,Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",
 	"-;",
 	"H1OR,Autosave Hiscores,Off,On;",
@@ -488,9 +490,20 @@ wire ce_pix;
 // MiSTer screen_rotate with rotate_ccw=1 gives us that orientation.
 wire rotate_ccw = 1;
 wire no_rotate = status[12] | direct_video;
-wire flip = ~no_rotate;
+// HDMI Flip (status[11]): forced on whenever the framebuffer-rotate path is
+// active (no_rotate=0), user-toggleable otherwise. Only reaches the DDRAM/FB
+// scaler output (screen_rotate), NOT direct CRT/VGA — same split as JunoFirst
+// (Arcade-JunoFirst.sv). See Claude/crt_flip_replicate_to_all_cores_2026-05-31.md.
+wire flip = status[11] | ~no_rotate;
 wire video_rotated;
 screen_rotate screen_rotate(.*);
+
+// CRT Flip (status[22]): hard render-level flip, independent of HDMI Flip.
+// XOR'd against the game's native cocktail-flip bit (video_flip) inside
+// segag80_video.sv so it reaches BOTH the HDMI/FB path and direct CRT/VGA
+// scanout, unlike screen_rotate above. Same pattern as JunoFirst's
+// flip_vertical -> eff_x/eff_y XOR in JunoFirst_CPU.sv.
+wire flip_vertical = status[22];
 
 arcade_video #(256, 24) arcade_video
 (
@@ -541,6 +554,9 @@ SegaG80 g80_inst
 	.p2_coin (m_coin2),
 
 	.service (m_service),
+
+	// CRT Flip (status[22]) — see wire flip_vertical above.
+	.flip_vertical(flip_vertical),
 
 	// DIP banks (active-LOW, MAME convention)
 	.dip_sw0 (dip_sw[0]),
