@@ -81,10 +81,31 @@ always @(posedge clk_sys or posedge reset) begin
     else       ph_cnt <= (ph_cnt == 4'd11) ? 4'd0 : ph_cnt + 4'd1;
 end
 
-wire ce_cpu_raw = (ph_cnt == 4'd0) || (ph_cnt == 4'd3) ||
-                  (ph_cnt == 4'd6) || (ph_cnt == 4'd9);     // /4
-assign ce_pix_o = (ph_cnt == 4'd0) || (ph_cnt == 4'd4) ||
-                  (ph_cnt == 4'd8);                          // /3
+// CLOCK-SWAP-FIX-2026-07-26 — the two clock enables were EXCHANGED.
+// MAME (segag80r.cpp:129-132, 1059):
+//     VIDEO_CLOCK = 15.46848 MHz     (= our clk_sys)
+//     PIXEL_CLOCK = VIDEO_CLOCK/3    = 5.1562 MHz
+//     Z80         = VIDEO_CLOCK/4    = 3.8671 MHz
+// The comments below always named the right divisors; the pulse POSITIONS
+// implemented the opposite. Positions {0,3,6,9} = one pulse every 3 clocks
+// (= /3); positions {0,4,8} = one pulse every 4 clocks (= /4). So ce_cpu was
+// getting /3 and ce_pix was getting /4 — exactly swapped.
+//
+// MEASURED before the fix (verilator/scramble, rate_main.cpp):
+//     ce_cpu 5.1562 MHz (should be 3.8671), ce_pix 3.8671 MHz (should be 5.1562)
+//     implied refresh = ce_pix/(HTOTAL 328 * VTOTAL 262) = 45.00 Hz, not 60.00
+// ⇒ the core ran a 45 Hz screen with a Z80 33% too fast. HW-corroborated
+// 2026-07-26: MAME plays noticeably FASTER than the core, which is what a
+// 45-vs-60 Hz frame rate looks like.
+// ORIGINAL (swapped):
+// wire ce_cpu_raw = (ph_cnt == 4'd0) || (ph_cnt == 4'd3) ||
+//                   (ph_cnt == 4'd6) || (ph_cnt == 4'd9);     // /4
+// assign ce_pix_o = (ph_cnt == 4'd0) || (ph_cnt == 4'd4) ||
+//                   (ph_cnt == 4'd8);                          // /3
+wire ce_cpu_raw = (ph_cnt == 4'd0) || (ph_cnt == 4'd4) ||
+                  (ph_cnt == 4'd8);                          // /4 = 3.8671 MHz
+assign ce_pix_o = (ph_cnt == 4'd0) || (ph_cnt == 4'd3) ||
+                  (ph_cnt == 4'd6) || (ph_cnt == 4'd9);      // /3 = 5.1562 MHz
 
 // Pause holds ce_cpu low so the Z80 freezes. Pixel clock keeps running so
 // the video output isn't destabilized.

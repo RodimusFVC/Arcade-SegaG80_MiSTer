@@ -421,6 +421,10 @@ wire m_fire2    = btn_fire    | joystick_1[4];
 // wire m_fire2b   = btn_fire2   | joystick_0[5];
 wire m_fire2b   = btn_fire2   | joystick_1[5];
 
+// (DIAG-REVERT-2026-07-26 warp lockout removed 2026-07-26: it did its job —
+//  slowdown persisted with warp physically disabled, so the input path is
+//  EXONERATED. Do not re-run this diagnostic.)
+
 //Start/coin/service
 wire m_start1   = btn_1p_start | joystick_0[6];
 wire m_start2   = btn_2p_start | joystick_0[7];
