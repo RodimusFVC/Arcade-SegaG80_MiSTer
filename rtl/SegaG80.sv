@@ -13,7 +13,7 @@
 module SegaG80 (
     input                reset,
     input                clk_sys,      // 15.468480 MHz (MAME VIDEO_CLOCK)
-    input          [2:0] game_id,      // 0=ASTROB,1=MONSTERB,2=SPACEOD/PIGNEWT,3=005,4=rsvd
+    input          [2:0] game_id,      // 0=ASTROB,1=MONSTERB,2=SPACEOD,3=005,4=SINDBADM,5=PIGNEWT
 
     // Player 1 controls (active HIGH)
     input                p1_up, p1_down, p1_left, p1_right,
@@ -281,10 +281,16 @@ assign video_r      = pix_r8;
 assign video_g      = pix_g8;
 assign video_b      = pix_b8;
 // Mix: astrob_audio (full gain) + speech (half gain per MAME vol balance).
+// `pause` reaches this module already (gates the CPU below) but was never
+// used for audio -- astrob_audio's oscillators run on clk_sys directly, not
+// ce_cpu, so a paused CPU (no new port writes) does NOT stop an
+// already-gated-on voice from continuing to oscillate and sound. Muting the
+// final mix here covers both astrob_audio and speech in one place, no
+// module port changes needed anywhere. Fixed 2026-07-26.
 wire signed [15:0] speech_halved = {speech_sample[15], speech_sample[15:1]};
 wire signed [16:0] mixed = $signed({astrob_sample[15], astrob_sample})
                          + $signed({speech_halved[15], speech_halved});
-assign audio_out =
+assign audio_out = pause ? 16'sd0 :
     (mixed >  17'sd32767) ?  16'sd32767 :
     (mixed < -17'sd32768) ? -16'sd32768 :
                              mixed[15:0];

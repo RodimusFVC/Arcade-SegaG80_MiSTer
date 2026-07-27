@@ -17,6 +17,8 @@
     <rbf>SegaG80</rbf>
     <about></about>
 
+    <buttons names="Shoot,Warp,Not Used,Not Used,Coin,Start 1P,Start 2P,Pause" default="A,B,X,Y,Select,Start,R,L"/>
+
     <!-- Index 1: Game ID byte — MUST appear before index 0 in MRA so it is
          received by the core before CPU ROM data begins loading.
          0x00 = Astro Blaster (315-0062 security chip). -->
@@ -27,7 +29,7 @@
     <flip>no</flip>
 
     <players>2 (alternating)</players>
-    <joystick>2-way horizontal</joystick>
+    <joystick>4-way</joystick>
     <special_controls></special_controls>
     <num_buttons>2</num_buttons>
     <button_names>Fire,Warp</button_names>

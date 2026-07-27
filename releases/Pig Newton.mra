@@ -18,8 +18,12 @@
     <about></about>
 
     <!-- Index 1: Game ID byte — MUST appear before index 0 in MRA.
-         0x02 = Pig Newton (315-0063 security chip, same as Space Odyssey). -->
-    <rom index="1"><part>02</part></rom>
+         0x05 = Pig Newton. Was 0x02 (shared with Space Odyssey) until
+         2026-07-26 -- they use the same 315-0063 security chip (still
+         handled together in SegaG80_CPU.sv's chip_sel mux) but need
+         different control-port layouts, which game_id also gates. Split
+         to its own id so control decode can tell them apart. -->
+    <rom index="1"><part>05</part></rom>
 
     <resolution>15kHz</resolution>
     <rotation>vertical (ccw)</rotation>

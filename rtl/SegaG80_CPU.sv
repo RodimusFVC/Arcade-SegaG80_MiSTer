@@ -9,7 +9,7 @@
 module SegaG80_CPU (
     input              reset,
     input              clk_sys,       // 15.468480 MHz
-    input        [2:0] game_id,       // 0=ASTROB,1=MONSTERB,2=SPACEOD/PIGNEWT,3=005,4=rsvd
+    input        [2:0] game_id,       // 0=ASTROB,1=MONSTERB,2=SPACEOD,3=005,4=SINDBADM,5=PIGNEWT
     input              pause,
     input              service,       // active HIGH, edge → NMI
 
@@ -314,11 +314,13 @@ end
 // the next opcode fetch, matching MAME's m_scrambled_write_pc lifecycle.
 //----------------------------------------------------------------------------
 wire [2:0] chip_sel =
-    (game_id == 3'd0) ? 3'd1 :   // ASTROB          → 315-0062
-    (game_id == 3'd1) ? 3'd6 :   // MONSTERB         → 315-0082
-    (game_id == 3'd2) ? 3'd2 :   // SPACEOD/PIGNEWT  → 315-0063
-    (game_id == 3'd3) ? 3'd4 :   // 005              → 315-0070
-                        3'd0;    // SINDBADM/unknown  → no-op
+    (game_id == 3'd0) ? 3'd1 :   // ASTROB    → 315-0062
+    (game_id == 3'd1) ? 3'd6 :   // MONSTERB  → 315-0082
+    (game_id == 3'd2) ? 3'd2 :   // SPACEOD   → 315-0063
+    (game_id == 3'd3) ? 3'd4 :   // 005       → 315-0070
+    (game_id == 3'd5) ? 3'd2 :   // PIGNEWT   → 315-0063 (same chip as SPACEOD,
+                                  //             confirmed via MAME's init_pignewt())
+                        3'd0;    // SINDBADM/unknown → no-op
 
 wire [7:0] decrypted_lo;
 segag80_decrypt decrypt_inst (
@@ -455,29 +457,76 @@ wire [7:0] video_port_r =
                  : 8'hFF;
 
 //----------------------------------------------------------------------------
-// Logical port assembly — MAME segag80r.cpp:632-706 + 720-747 (astrob)
-// All bits are ACTIVE-LOW unless noted (IP_ACTIVE_LOW is the MAME default).
+// Logical port assembly — MAME segag80r.cpp g80r_generic + per-game
+// PORT_MODIFY overrides. All bits are ACTIVE-LOW unless noted
+// (IP_ACTIVE_LOW is the MAME default).
 //----------------------------------------------------------------------------
+// Per-game control mapping — verified against segag80r.cpp
+// INPUT_PORTS_START(<game>) PORT_MODIFY overrides on top of g80r_generic,
+// one case arm per game_id, matching MAME's source 1:1. game_id is now
+// unique per game (Pig Newton split off id 5 on 2026-07-26 specifically
+// because its control layout differs from Space Odyssey's even though
+// they share a security chip — see the id comment at this module's top
+// and the chip_sel mux above). Full per-game bit layouts differ more than
+// a single bit: Space Odyssey moves its buttons into D7D6 entirely, so
+// nothing here can be assumed "same for every game."
+//
+//   ASTROB (0):    2-way, 2 buttons.   D5D4: 2=LEFT,3=BTN1,6=RIGHT,7=BTN2
+//   MONSTERB(1)/
+//   005(3)/
+//   SINDBADM(4)/
+//   PIGNEWT(5):    4-way, 1 button.    D7D6: 6=UP
+//                                      D5D4: 2=LEFT,3=BTN1,6=RIGHT,7=DOWN
+//   SPACEOD (2):   8-way, 2 buttons,   D7D6: 5=BTN2,6=BTN1
+//                  MAME tags every                        (no upright
+//                  relevant bit                            layout ever
+//                  PORT_COCKTAIL                           shipped)
+//                  (no upright ever   D5D4: 2=UP,3=LEFT,6=DOWN,7=RIGHT
+//                  shipped)
+//----------------------------------------------------------------------------
+reg d7d6_b5, d7d6_b6;
+reg d5d4_b2, d5d4_b3, d5d4_b6, d5d4_b7;
+always @(*) begin
+    case (game_id)
+        3'd0: begin // ASTROB
+            d7d6_b5 = 1'b1;      d7d6_b6 = 1'b1;
+            d5d4_b2 = ~p1_left;  d5d4_b3 = ~p1_fire1;
+            d5d4_b6 = ~p1_right; d5d4_b7 = ~p1_fire2;
+        end
+        3'd2: begin // SPACEOD
+            d7d6_b5 = ~p1_fire2; d7d6_b6 = ~p1_fire1;
+            d5d4_b2 = ~p1_up;    d5d4_b3 = ~p1_left;
+            d5d4_b6 = ~p1_down;  d5d4_b7 = ~p1_right;
+        end
+        default: begin // MONSTERB/005/SINDBADM/PIGNEWT
+            d7d6_b5 = 1'b1;      d7d6_b6 = ~p1_up;
+            d5d4_b2 = ~p1_left;  d5d4_b3 = ~p1_fire1;
+            d5d4_b6 = ~p1_right; d5d4_b7 = ~p1_down;
+        end
+    endcase
+end
+
 wire [7:0] logical_d7d6 = {
-    3'b111,                 // bits 7..5 unused (HIGH)
-    ~p2_coin,               // bit 4 = COIN2
-    3'b111,                 // bits 3..1 unused (HIGH)
-    ~p1_coin                // bit 0 = COIN1
+    1'b1,                    // bit 7 unused (HIGH)
+    d7d6_b6,                 // bit 6 = see per-game case above
+    d7d6_b5,                 // bit 5 = see per-game case above
+    ~p2_coin,                // bit 4 = COIN2
+    3'b111,                  // bits 3..1 unused (HIGH)
+    ~p1_coin                 // bit 0 = COIN1
 };
 // NOTE: MiSTer has one coin button per player. We drive both COIN1 and
 // COIN2 from p1_coin here for ASTROB single-player. T2.4 overrides with
 // a per-game mapping if needed.
 
 wire [7:0] logical_d5d4 = {
-    ~p1_fire2,              // bit 7 = BUTTON2 (cocktail-flipped in MAME,
-                            //                  but D5D4 is upright-side)
-    ~p1_right,              // bit 6 = JOYSTICK_RIGHT
-    ~p2_start,              // bit 5 = START2
-    1'b1,                   // bit 4 unused
-    ~p1_fire1,              // bit 3 = BUTTON1
-    ~p1_left,               // bit 2 = JOYSTICK_LEFT
-    ~p1_start,              // bit 1 = START1
-    ~service                // bit 0 = SERVICE1
+    d5d4_b7,                 // bit 7 = see per-game case above
+    d5d4_b6,                 // bit 6 = see per-game case above
+    ~p2_start,               // bit 5 = START2
+    1'b1,                    // bit 4 unused
+    d5d4_b3,                 // bit 3 = see per-game case above
+    d5d4_b2,                 // bit 2 = see per-game case above
+    ~p1_start,               // bit 1 = START1
+    ~service                 // bit 0 = SERVICE1
 };
 
 wire [7:0] logical_d3d2 = dip_sw0;     // SW1 bank, active-LOW

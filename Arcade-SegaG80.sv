@@ -237,8 +237,12 @@ localparam CONF_STR = {
 	"A.SEGAG80;;",
 	"ODE,Aspect Ratio,Original,Full screen,[ARC1],[ARC2];",
 	"OC,Orientation,Vert,Horz;",
-	"OB,HDMI Flip,Off,On;",
-	"OM,CRT Flip,Off,On;",
+	// FLIP-DISABLED-2026-07-26: broke video for some CRT users, root cause
+	// not yet confirmed (see Claude/crt_hdmi_flip_added_2026-07-26.md).
+	// Hid the OSD options so they're not shown while non-functional —
+	// uncomment both lines here + the two below to re-enable.
+	// "OB,HDMI Flip,Off,On;",
+	// "OM,CRT Flip,Off,On;",
 	"OFH,Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",
 	"-;",
 	"H1OR,Autosave Hiscores,Off,On;",
@@ -253,7 +257,16 @@ localparam CONF_STR = {
 	"P2O7A,V Center,0,-1,-2,-3,-4,-5,-6,-7,-8,-9,-10,-11,-12;",
 	"-;",
 	"R0,Reset;",
-	"J1,Fire,Fire2,Start P1,Start P2,Coin,Service;",
+	// Slots 3/4 are unused by every game currently on this core (max real
+	// button count is 2, on astrob/spaceod) but must stay reserved so bit
+	// positions match the MRAs' universal 8-slot button template exactly
+	// (see Astro Blaster.mra / 005.mra <buttons names=...>) -- this is a
+	// shared multi-game core, so J1 can't be sized per-game like a
+	// single-game core's CONF_STR normally would. Generic "Button N" names
+	// (not "Fire"/"Warp") because meaning differs per game (astrob:
+	// Fire+Warp, 005/monsterb/pignewt/sindbadm: Fire only, spaceod: 2
+	// buttons) -- same convention SNK6502 uses for the same reason.
+	"J1,Button 1,Button 2,Not Used,Not Used,Coin,Start 1P,Start 2P,Pause;",
 	"jn,A,B,Start,R,Select,L;",
 	"V,v",`BUILD_DATE
 };
@@ -428,12 +441,21 @@ wire m_fire2b   = btn_fire2   | joystick_1[5];
 //  EXONERATED. Do not re-run this diagnostic.)
 
 //Start/coin/service
-wire m_start1   = btn_1p_start | joystick_0[6];
-wire m_start2   = btn_2p_start | joystick_0[7];
+// Bit positions match the new 8-slot J1 above (button,button,-,-,coin,
+// start1,start2,pause), NOT the old 6-slot one. Fixed 2026-07-26: the MRAs
+// were already on the 8-slot universal template but J1 above was still the
+// old 6-slot layout, so every bit from Start P1 onward landed 2-3 positions
+// off (e.g. bit6 read as "Start P1" here while the MRA's default binding
+// for that slot was an unrelated physical button) -- this is what broke
+// controls, not the earlier game_id control-mapping fix.
+wire m_start1   = btn_1p_start | joystick_0[9];
+wire m_start2   = btn_2p_start | joystick_0[10];
 wire m_coin1    = btn_coin1    | joystick_0[8];
 wire m_coin2    = btn_coin2;
-wire m_service  = btn_service  | joystick_0[9];
-wire m_pause    = btn_pause;
+// No "Service" slot in the 8-slot template (no sibling core in this vault
+// exposes Service as a mappable gamepad button either) -- keyboard-only.
+wire m_service  = btn_service;
+wire m_pause    = btn_pause    | joystick_0[11];
 
 // PAUSE SYSTEM
 wire pause_cpu;
@@ -456,7 +478,10 @@ always @(posedge CLK_SYS) begin
 end
 
 // Game ID — latched from MRA ioctl_index=1 byte 0, must arrive before index=0 ROM data.
-// 0=ASTROB, 1=MONSTERB, 2=SPACEOD/PIGNEWT, 3=005, 4=SINDBADM(unsupported)
+// 0=ASTROB, 1=MONSTERB, 2=SPACEOD, 3=005, 4=SINDBADM(unsupported), 5=PIGNEWT
+// (2 and 5 both use the 315-0063 security chip -- see chip_sel in
+// SegaG80_CPU.sv -- but need distinct ids because their control-port
+// layouts differ; split 2026-07-26.)
 reg [2:0] game_id;
 always @(posedge CLK_SYS)
 	if (ioctl_wr && (ioctl_index == 8'd1) && (ioctl_addr == 25'd0))
@@ -490,20 +515,19 @@ wire ce_pix;
 // MiSTer screen_rotate with rotate_ccw=1 gives us that orientation.
 wire rotate_ccw = 1;
 wire no_rotate = status[12] | direct_video;
-// HDMI Flip (status[11]): forced on whenever the framebuffer-rotate path is
-// active (no_rotate=0), user-toggleable otherwise. Only reaches the DDRAM/FB
-// scaler output (screen_rotate), NOT direct CRT/VGA — same split as JunoFirst
-// (Arcade-JunoFirst.sv). See Claude/crt_flip_replicate_to_all_cores_2026-05-31.md.
-wire flip = status[11] | ~no_rotate;
+// FLIP-DISABLED-2026-07-26: broke video for some CRT users, root cause not
+// yet confirmed (see Claude/crt_hdmi_flip_added_2026-07-26.md). Reverted to
+// pre-flip behavior below; original flip-feature lines kept commented for
+// a clean re-enable once root-caused.
+// wire flip = status[11] | ~no_rotate;
+wire flip = ~no_rotate;
 wire video_rotated;
 screen_rotate screen_rotate(.*);
 
-// CRT Flip (status[22]): hard render-level flip, independent of HDMI Flip.
-// XOR'd against the game's native cocktail-flip bit (video_flip) inside
-// segag80_video.sv so it reaches BOTH the HDMI/FB path and direct CRT/VGA
-// scanout, unlike screen_rotate above. Same pattern as JunoFirst's
-// flip_vertical -> eff_x/eff_y XOR in JunoFirst_CPU.sv.
-wire flip_vertical = status[22];
+// wire flip_vertical = status[22];
+wire flip_vertical = 1'b0;   // FLIP-DISABLED-2026-07-26: forces segag80_video.sv's
+                              // flip_eff = video_flip ^ 0 = video_flip (original
+                              // behavior), no changes needed downstream.
 
 arcade_video #(256, 24) arcade_video
 (

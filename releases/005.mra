@@ -17,6 +17,8 @@
     <rbf>SegaG80</rbf>
     <about></about>
 
+    <buttons names="Shoot,Not Used,Not Used,Not Used,Coin,Start 1P,Start 2P,Pause" default="A,B,X,Y,Select,Start,R,L"/>
+
     <!-- Index 1: Game ID byte — MUST appear before index 0 in MRA.
          0x03 = 005 (315-0070 security chip). -->
     <rom index="1"><part>03</part></rom>
