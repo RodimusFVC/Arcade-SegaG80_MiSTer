@@ -237,12 +237,6 @@ localparam CONF_STR = {
 	"A.SEGAG80;;",
 	"ODE,Aspect Ratio,Original,Full screen,[ARC1],[ARC2];",
 	"OC,Orientation,Vert,Horz;",
-	// FLIP-DISABLED-2026-07-26: broke video for some CRT users, root cause
-	// not yet confirmed (see Claude/crt_hdmi_flip_added_2026-07-26.md).
-	// Hid the OSD options so they're not shown while non-functional —
-	// uncomment both lines here + the two below to re-enable.
-	// "OB,HDMI Flip,Off,On;",
-	// "OM,CRT Flip,Off,On;",
 	"OFH,Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",
 	"-;",
 	"H1OR,Autosave Hiscores,Off,On;",
@@ -515,19 +509,9 @@ wire ce_pix;
 // MiSTer screen_rotate with rotate_ccw=1 gives us that orientation.
 wire rotate_ccw = 1;
 wire no_rotate = status[12] | direct_video;
-// FLIP-DISABLED-2026-07-26: broke video for some CRT users, root cause not
-// yet confirmed (see Claude/crt_hdmi_flip_added_2026-07-26.md). Reverted to
-// pre-flip behavior below; original flip-feature lines kept commented for
-// a clean re-enable once root-caused.
-// wire flip = status[11] | ~no_rotate;
 wire flip = ~no_rotate;
 wire video_rotated;
 screen_rotate screen_rotate(.*);
-
-// wire flip_vertical = status[22];
-wire flip_vertical = 1'b0;   // FLIP-DISABLED-2026-07-26: forces segag80_video.sv's
-                              // flip_eff = video_flip ^ 0 = video_flip (original
-                              // behavior), no changes needed downstream.
 
 arcade_video #(256, 24) arcade_video
 (
@@ -578,9 +562,6 @@ SegaG80 g80_inst
 	.p2_coin (m_coin2),
 
 	.service (m_service),
-
-	// CRT Flip (status[22]) — see wire flip_vertical above.
-	.flip_vertical(flip_vertical),
 
 	// DIP banks (active-LOW, MAME convention)
 	.dip_sw0 (dip_sw[0]),

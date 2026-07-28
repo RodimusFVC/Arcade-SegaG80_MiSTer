@@ -15,11 +15,6 @@ module segag80_video (
     input              cpu_wr,
     input              video_control_1, // m_video_control[1]: palette enable
     input              video_flip,      // m_video_flip
-    input              flip_vertical,   // CRT Flip OSD override (status[22] at
-                                         // the Arcade-SegaG80.sv level), XOR'd
-                                         // against video_flip below. Same
-                                         // pattern as JunoFirst_CPU.sv's
-                                         // eff_x/eff_y flip_vertical XOR.
 
     // Scanout side — from T1.4 vtg
     input              ce_pix,
@@ -136,12 +131,8 @@ module segag80_video (
     wire [2:0] pix_col = h_cnt[2:0];
     wire [2:0] pix_row = v_cnt[2:0];
 
-    // CRT Flip (flip_vertical) XORs on top of the game's native cocktail-flip
-    // bit (video_flip) so the OSD toggle works regardless of what the game
-    // itself has set — same combination JunoFirst uses for flip_x/flip_y.
-    wire       flip_eff     = video_flip ^ flip_vertical;
-    wire [4:0] flipmask5   = {5{flip_eff}};
-    wire [2:0] flipmask3   = {3{flip_eff}};
+    wire [4:0] flipmask5   = {5{video_flip}};
+    wire [2:0] flipmask3   = {3{video_flip}};
 
     // Display-side effective coords (for bit_sel on _cur registers).
     wire [2:0] eff_pix_col = pix_col ^ flipmask3;
@@ -170,7 +161,7 @@ module segag80_video (
     // `active` gates the output to v_cnt < 224.
     wire [4:0] safe_fetch_char_y = (fetch_char_y > 5'd27) ? 5'd27 : fetch_char_y;
 
-    wire [4:0] eff_fetch_char_y = flip_eff ? (5'd27 - safe_fetch_char_y) : safe_fetch_char_y;
+    wire [4:0] eff_fetch_char_y = video_flip ? (5'd27 - safe_fetch_char_y) : safe_fetch_char_y;
     wire [4:0] eff_fetch_char_x = fetch_char_x ^ flipmask5;
     wire [2:0] eff_fetch_pix_row = fetch_v[2:0] ^ flipmask3;
 
