@@ -123,30 +123,10 @@ module astrob_audio (
     //------------------------------------------------------------------------
     localparam [17:0] INV1_PER_NORM     = 18'd148307;  // clk/104.3Hz - 1
     localparam [17:0] INV1_PER_WARP     = 18'd171299;  // clk/90.3Hz  - 1
-    // TUNE-REVERT-2026-08-09: Ian's originals below, uncomment to restore
-    // localparam [17:0] INV1_W_MIN        = 18'd22246;   // 0.15 * INV1_PER_NORM
-    // localparam [17:0] INV1_W_SPAN       = 18'd29661;   // 0.20 * INV1_PER_NORM
-    //
-    // Depth retuned against ab_wavs/Fixed real_inv1.wav + Original Sounds/
-    // Invader 1.wav (two independent cuts, agreeing on depth 0.52-0.53).
-    // Ian's span rendered depth 0.25 with the +-1 sideband at -15 dB vs the
-    // board's -8. Doubling the swing lands depth 0.53 and the sideband at -8.
-    //
-    // ⚠️ RATE IS UNCHANGED AND MUST STAY 23695. A 2026-08-09 attempt to move it
-    // to 22801 ("2.65 Hz") was WRONG: that rate came from an envelope-FFT with
-    // only 0.25-0.33 Hz resolution on a 3-4 s clip. The SIDEBAND SPACING in the
-    // audio spectrum is the high-resolution measurement of the same quantity,
-    // and it reads 2.54-2.56 Hz on the board and 2.54 Hz at 23695. Changing it
-    // pushed spacing to 2.66 and broke a match that was already correct.
-    // Measure modulation rate from sideband spacing, never the envelope FFT.
-    localparam [15:0] INV1_ENVSTEP_NORM = 16'd23695;   // (clk/2.55Hz)/256 — correct
-    localparam [15:0] INV1_ENVSTEP_WARP = 16'd33018;   // (clk/1.83Hz)/256  #unverified,
-                                                       // no isolated warp capture exists
-    localparam [17:0] INV1_W_MIN        = 18'd7415;    // 0.05 * INV1_PER_NORM
-    localparam [17:0] INV1_W_SPAN       = 18'd59323;   // 0.40 * INV1_PER_NORM
-                                                       // => duty 0.05..0.45, mean 0.25
-                                                       // (was 0.15..0.35): same mean,
-                                                       // double the swing
+    localparam [15:0] INV1_ENVSTEP_NORM = 16'd23695;   // (clk/2.55Hz)/256
+    localparam [15:0] INV1_ENVSTEP_WARP = 16'd33018;   // (clk/1.83Hz)/256
+    localparam [17:0] INV1_W_MIN        = 18'd22246;   // 0.15 * INV1_PER_NORM
+    localparam [17:0] INV1_W_SPAN       = 18'd29661;   // 0.20 * INV1_PER_NORM
 
     wire [17:0] inv1_period  = warp_active ? INV1_PER_WARP     : INV1_PER_NORM;
     wire [15:0] inv1_envstep = warp_active ? INV1_ENVSTEP_WARP : INV1_ENVSTEP_NORM;
@@ -175,12 +155,7 @@ module astrob_audio (
 
     reg [17:0] inv1_per_cnt, inv1_wid_cnt;
     always @(posedge clk_sys or posedge reset) begin
-        // Async-reset branch must test ONLY `reset` (Quartus 17.0 error 10200);
-        // the gate clear is the same values, moved to a sync branch.
-        if (reset) begin
-            inv1_per_cnt <= 18'd0;
-            inv1_wid_cnt <= 18'd0;
-        end else if (!inv1_gate) begin
+        if (reset || !inv1_gate) begin
             inv1_per_cnt <= 18'd0;
             inv1_wid_cnt <= 18'd0;
         end else if (inv1_per_cnt == 18'd0) begin
@@ -309,10 +284,7 @@ module astrob_audio (
     reg  [7:0] inv3_lfo;
     reg        inv3_lfo_dir;
     always @(posedge clk_sys or posedge reset) begin
-        // Async-reset branch must test ONLY `reset` (Quartus 17.0 error 10200).
-        if (reset) begin
-            inv3_lfo <= 8'd128;  inv3_lfo_dir <= 1'b0;  inv3_lfo_pre <= 21'd0;
-        end else if (!inv3_gate) begin
+        if (reset || !inv3_gate) begin
             inv3_lfo <= 8'd128;  inv3_lfo_dir <= 1'b0;  inv3_lfo_pre <= 21'd0;
         end else if (inv3_lfo_pre >= inv3_lfo_step) begin
             inv3_lfo_pre <= 21'd0;
@@ -338,11 +310,7 @@ module astrob_audio (
     reg [16:0] inv3_osc_cnt;
     reg        inv3_osc_out;
     always @(posedge clk_sys or posedge reset) begin
-        // Async-reset branch must test ONLY `reset` (Quartus 17.0 error 10200).
-        if (reset) begin
-            inv3_osc_cnt <= 17'd0;
-            inv3_osc_out <= 1'b0;
-        end else if (!inv3_gate) begin
+        if (reset || !inv3_gate) begin
             inv3_osc_cnt <= 17'd0;
             inv3_osc_out <= 1'b0;
         end else if (inv3_osc_cnt == 17'd0) begin
@@ -416,11 +384,7 @@ module astrob_audio (
     reg [16:0] inv4_osc_cnt;
     reg        inv4_osc_out;
     always @(posedge clk_sys or posedge reset) begin
-        // Async-reset branch must test ONLY `reset` (Quartus 17.0 error 10200).
-        if (reset) begin
-            inv4_osc_cnt <= 17'd0;
-            inv4_osc_out <= 1'b0;
-        end else if (!inv4_gate) begin
+        if (reset || !inv4_gate) begin
             inv4_osc_cnt <= 17'd0;
             inv4_osc_out <= 1'b0;
         end else if (inv4_osc_cnt == 17'd0) begin

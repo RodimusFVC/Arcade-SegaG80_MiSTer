@@ -275,16 +275,32 @@ assign ce_pix       = ce_pix_i;
 assign video_r      = pix_r8;
 assign video_g      = pix_g8;
 assign video_b      = pix_b8;
-// Mix: astrob_audio (full gain) + speech (half gain per MAME vol balance).
+// Mix: astrob_audio + speech at EQUAL gain, then 0.5 on the sum.
+//
+// LEVEL FIX 2026-08-09 — the old comment ("speech at half gain per MAME vol
+// balance") misread MAME. segag80r.cpp:1085-86 is:
+//     ASTRO_BLASTER_AUDIO(...).add_route(ALL_OUTPUTS, "speech", 1.0, 1);
+//     SEGA_SPEECH_BOARD(...).add_route(ALL_OUTPUTS, "speaker", 0.5);
+// The sound board does NOT route to the speaker -- it routes INTO the speech
+// board at gain 1.0, and the speech board's COMBINED output hits the speaker
+// at 0.5. Speech itself is 1.0 internally (segaspeech.cpp:207/218). So the 0.5
+// is a MASTER on the sum, not an attenuation of speech. Applying it to the
+// speech leg alone put the voice 6 dB under the sound board -- user on HW:
+// "voice is low, invaders are blaring."
+// Net effect of this fix: speech absolute level UNCHANGED, invaders -6 dB.
 // `pause` reaches this module already (gates the CPU below) but was never
 // used for audio -- astrob_audio's oscillators run on clk_sys directly, not
 // ce_cpu, so a paused CPU (no new port writes) does NOT stop an
 // already-gated-on voice from continuing to oscillate and sound. Muting the
 // final mix here covers both astrob_audio and speech in one place, no
 // module port changes needed anywhere. Fixed 2026-07-26.
-wire signed [15:0] speech_halved = {speech_sample[15], speech_sample[15:1]};
-wire signed [16:0] mixed = $signed({astrob_sample[15], astrob_sample})
-                         + $signed({speech_halved[15], speech_halved});
+// LEVELFIX-REVERT-2026-08-09: original speech-halved mix below, uncomment to restore
+// wire signed [15:0] speech_halved = {speech_sample[15], speech_sample[15:1]};
+// wire signed [16:0] mixed = $signed({astrob_sample[15], astrob_sample})
+//                          + $signed({speech_halved[15], speech_halved});
+wire signed [17:0] mix_sum = $signed({{2{astrob_sample[15]}}, astrob_sample})
+                           + $signed({{2{speech_sample[15]}},  speech_sample});
+wire signed [16:0] mixed   = mix_sum[17:1];   // master 0.5 on the SUM, per MAME
 assign audio_out = pause ? 16'sd0 :
     (mixed >  17'sd32767) ?  16'sd32767 :
     (mixed < -17'sd32768) ? -16'sd32768 :
