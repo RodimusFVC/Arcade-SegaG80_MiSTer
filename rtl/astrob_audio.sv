@@ -21,8 +21,8 @@
 //    1 I_INVADER_2   [DONE]        1 I_LASER_2
 //    2 I_INVADER_3   [DONE]        2 I_SHORT_EXPL
 //    3 I_INVADER_4   [DONE]        3 I_LONG_EXPL
-//    4 I_ASTROIDS                  4 I_ATTACK_RATE (V-generator input, not built)
-//    5 I_MUTE        [DONE]        5 I_RATE_RESET  (V-generator input, not built)
+//    4 I_ASTROIDS                  4 I_ATTACK_RATE [DONE] V-generator clock
+//    5 I_MUTE        [DONE]        5 I_RATE_RESET  [DONE] V-generator reset
 //    6 I_REFILL                    6 I_BONUS
 //    7 I_WARP        [DONE, modifier only, no standalone sound]  7 I_SONAR
 //  (verified against nl_astrob.cpp ALIAS lines directly — NOT the older
@@ -70,6 +70,108 @@ module astrob_audio (
     // the whole mix, bit=0 is normal. The old placeholder had no mute path
     // ("no dedicated SOUND_ON bit" was wrong — I_MUTE genuinely exists).
     wire mute = latch_3e[5];
+
+    //------------------------------------------------------------------------
+    // V GENERATOR — U15 CD4017 attack-rate ladder (Sheet 7, middle-bottom).
+    // BUILT 2026-07-30. This is the pitch envelope for the ENTIRE invader
+    // family: "V" feeds every invader 555's CONTROL VOLTAGE pin, so without
+    // it each invader is a flat drone that just holds while its gate is low.
+    // Schematic 800-3122 sheet 7 confirms V landing at all four voices:
+    // U13.5 (INV2), the U23/U18 pair (INV1), U17 via R53/R54 (INV3), and the
+    // U37/U38 section (INV4) — matching nl_astrob.cpp.
+    //
+    // Circuit: I_ATTACK_RATE clocks U15 (CD4017 decade counter) through a
+    // U21 CD4011 pulse shaper; I_RATE_RESET clears it. Exactly one of Q0..Q9
+    // is high at a time, each diode-OR'd (D14-D23) through its own resistor
+    // into U16's inverting summing node, with R178 (22k) as feedback:
+    //
+    //   Q0..Q9 -> R161/R160/R159/R155/R153/R156/R158/R157/R154/R152
+    //           = 120k 82k 62k 56k 47k 39k 33k 27k 24k 22k   (monotonic!)
+    //
+    // Lower tap resistance -> more current into the summing node -> lower V
+    // -> the 555 charges to a lower threshold -> HIGHER frequency. So pumping
+    // ATTACK RATE walks the invader pitch UP in ten discrete steps, and
+    // RATE_RESET drops it back to the bottom. That is the classic escalating
+    // invader march, and it is the single biggest thing missing from the
+    // sustained-drone the voices produce today.
+    //
+    // ✅ MEASURED, NOT DERIVED. The step table below comes from the real
+    // board: "Attack Rate" segment of Useful Information/astrob.wav
+    // (167.5s-177.0s, labeled in Claude/astrob_wav_markers_2026-07-26.md as
+    // "discrete step changes ... consistent with the CD4017 advancing").
+    // Harmonic-sum pitch tracking over that window resolves exactly TEN
+    // levels, monotonically rising, then a hard reset back to level 0:
+    //
+    //   Q0..Q9 f0 = 104.10 106.60 109.60 110.70 113.50
+    //               116.90 120.50 126.00 130.40 133.50 Hz   (span 1.2824x)
+    //
+    // Cross-check: solving the 555 control-voltage equation against the
+    // netlist resistor values above predicts a 1.3335x span — within 4% of
+    // measurement, using an assumed diode drop. Mechanism confirmed; the
+    // MEASURED numbers are what's used here.
+    //
+    // Stored as Q0-normalized PERIOD multipliers in 1.15 fixed point, so each
+    // voice keeps its own already-validated base frequency (which was
+    // captured at the reset state = Q0) and is simply scaled.
+    //
+    // #unverified — one voice's ladder is applied to all four. The real span
+    // differs slightly per voice because a 555's discharge phase is
+    // V-independent, so each voice's R_A/R_B/C mix weights the effect a
+    // little differently. Deriving that per-voice needs the analog solve we
+    // deliberately aren't doing; one shared ladder is far closer to the board
+    // than today's no-ladder-at-all.
+    //------------------------------------------------------------------------
+
+    // I_RATE_RESET = ALIAS(U31.12): 7406 INVERTING open-collector + R96 10k
+    // pull-up into U15 pin 15 (RESET, active HIGH on a CD4017).
+    //   port bit 0 -> buffer off -> pull-up wins -> pin 15 HIGH -> held at Q0
+    //   port bit 1 -> buffer pulls low        -> reset released -> counter runs
+    wire v_rate_reset = ~latch_3f[5];
+
+    // I_ATTACK_RATE = ALIAS(U26.2): 7407 NON-inverting open-collector, so it
+    // follows port bit 4 directly, then through U21 (CD4011) + R148/R166/C67
+    // as an edge-triggered pulse shaper into U15 pin 14 (CLOCK).
+    // #unverified: the shaper's output edge polarity isn't derivable without
+    // an analog solve. Modeled as advance-on-rising-edge of the raw port bit;
+    // if the ramp lands one step out of phase, flip this edge.
+    // Resets to 1'b1, NOT 1'b0: latch_3f powers up as 8'hFF, so bit 4 already
+    // reads high out of reset. Initializing this to 0 manufactures a phantom
+    // rising edge on the first clock and the ladder starts life on Q1 instead
+    // of Q0 — caught in Verilator (verilator/vgen), every step was off by one.
+    reg  attack_rate_d;
+    wire v_clk = latch_3f[4] & ~attack_rate_d;
+
+    // U15 pin 13 (CLOCK INHIBIT) is tied to GND, so the counter is never
+    // gated and genuinely wraps Q9 -> Q0 rather than saturating.
+    reg [3:0] v_step;
+    always @(posedge clk_sys or posedge reset) begin
+        if (reset) begin
+            v_step        <= 4'd0;
+            attack_rate_d <= 1'b1;   // match latch_3f[4]'s 8'hFF power-up value
+        end else begin
+            attack_rate_d <= latch_3f[4];
+            if (v_rate_reset)   v_step <= 4'd0;
+            else if (v_clk)     v_step <= (v_step == 4'd9) ? 4'd0 : v_step + 4'd1;
+        end
+    end
+
+    // Period multiplier, Q0-normalized, 1.15 fixed point (32768 = 1.0).
+    reg [15:0] v_mult;
+    always @(*) begin
+        case (v_step)
+            4'd0:    v_mult = 16'd32768;   // 104.10 Hz  (reset state)
+            4'd1:    v_mult = 16'd32000;   // 106.60 Hz
+            4'd2:    v_mult = 16'd31124;   // 109.60 Hz
+            4'd3:    v_mult = 16'd30814;   // 110.70 Hz
+            4'd4:    v_mult = 16'd30054;   // 113.50 Hz
+            4'd5:    v_mult = 16'd29180;   // 116.90 Hz
+            4'd6:    v_mult = 16'd28308;   // 120.50 Hz
+            4'd7:    v_mult = 16'd27073;   // 126.00 Hz
+            4'd8:    v_mult = 16'd26159;   // 130.40 Hz
+            4'd9:    v_mult = 16'd25552;   // 133.50 Hz
+            default: v_mult = 16'd32768;
+        endcase
+    end
 
     //------------------------------------------------------------------------
     // INVADER_2 (nl_astrob.cpp Sheet 8, middle) — DONE, VALIDATED against
@@ -135,7 +237,12 @@ module astrob_audio (
 
     wire inv2_gate = ~latch_3e[1];
 
+    // Base = V-ladder step Q0 (the RATE_RESET state the wav capture was made
+    // in); scaled by v_mult for steps Q1..Q9 — see V GENERATOR above.
     localparam [15:0] INV2_HALF_PERIOD = 16'd2481;   // clk_sys/(2*3117Hz), nominal
+
+    wire [31:0] inv2_hp_scaled  = INV2_HALF_PERIOD * v_mult;
+    wire [15:0] inv2_half_period = inv2_hp_scaled[30:15];
 
     reg [15:0] inv2_osc_cnt;
     reg        inv2_osc_out;
@@ -144,10 +251,10 @@ module astrob_audio (
             inv2_osc_cnt <= INV2_HALF_PERIOD;
             inv2_osc_out <= 1'b0;
         end else if (!inv2_gate) begin
-            inv2_osc_cnt <= INV2_HALF_PERIOD;
+            inv2_osc_cnt <= inv2_half_period;
             inv2_osc_out <= 1'b0;
         end else if (inv2_osc_cnt == 16'd0) begin
-            inv2_osc_cnt <= INV2_HALF_PERIOD;
+            inv2_osc_cnt <= inv2_half_period;
             inv2_osc_out <= ~inv2_osc_out;
         end else begin
             inv2_osc_cnt <= inv2_osc_cnt - 16'd1;
@@ -180,12 +287,65 @@ module astrob_audio (
     end
 
     // Weighted bipolar sum of 4 tap bits, weights ~ 1/R rounded to small
-    // integers (R47=10k:8, R49=39k:2, R50=22k:4, R48=82k:1). Range -15..+15.
+    // integers (R47=10k:8, R50=22k:4, R49=39k:2, R48=82k:1). Range -15..+15.
+    //
+    // ⛔ TAP REMAP TRIED AND REJECTED 2026-07-30 — DO NOT REDO IT NAIVELY.
+    // A sweep of all 840 assignments of these weights onto 4 of the 7 counter
+    // stages, scored by spectral RMS against the real "Invader 2" capture,
+    // confidently recommended w8->Q5, w4->Q6 (unanimous across two runs, RMS
+    // 21.9 -> 14.5 dB). It is WRONG, and the metric is why: it compared full
+    // log-spectra including the noise floor between harmonics. The real
+    // capture has a noise floor; a synthetic voice does not. So the score
+    // rewarded whichever mapping produced the DENSEST harmonic comb (heavy
+    // weights on slow stages) simply because that fills the gaps — not
+    // because it sounds more alike.
+    //
+    // The direct evidence says the opposite and outranks the fit: the real
+    // voice's perceived fundamental is 199.0 Hz ~= base/16 = 3117/16 = 194.8,
+    // and the perceived fundamental follows the HEAVIEST tap. That puts w8 on
+    // Q3 (divide-by-16) — the mapping already here. Rendering the remapped RTL
+    // confirmed it: f0 fell to 76.5 Hz against the real 199.0 Hz, i.e. audibly
+    // the wrong pitch, in exchange for a better-looking RMS number.
+    //
+    // If this is ever revisited: score against harmonic amplitudes at
+    // multiples of the measured f0, or add a matched noise floor to the
+    // synthetic — and require the perceived f0 to land on 199 Hz. The stage
+    // assignment for the two LIGHT taps is still genuinely unknown; the fit
+    // couldn't resolve them either (Q0/Q1/Q2 near-tied).
+    //------------------------------------------------------------------------
+    // CD4024 tap ladder — rebuilt as a true binary DAC 2026-08-08.
+    //
+    // U12 is a weighted-resistor DAC on Q1-Q4: R47 10k / R50 22k / R49 39k /
+    // R48 82k => weights 8/4/2/1. In a ripple counter Q1 is FASTEST, so a
+    // binary ramp needs the MSB on the SLOWEST of the four and the LSB on the
+    // fastest. That reconstructs a sawtooth at the MSB rate with a full
+    // harmonic series; the old mapping put the 3 light taps on stages SLOWER
+    // than the MSB, which is not a binary count at all -- a scrambled
+    // staircase, not a ramp.
+    //
+    // ⚠️ This is NOT the 2026-07-30 remap that was tried and REJECTED. That one
+    // moved the HEAVY taps onto slow stages (w8->Q5, w4->Q6) and collapsed f0
+    // from 199 Hz to 76.5 Hz. This keeps w8 exactly where it is, on div[3] =
+    // base/16 = 194.8 Hz vs the real voice's measured f0 199.0 Hz, so the one
+    // load-bearing pitch constraint is untouched. Only the three LIGHT taps
+    // move -- the ones the 840-way sweep could never resolve (Q0/Q1/Q2/Q3
+    // near-tied) and which are therefore not being over-fitted, just placed
+    // where the circuit topology says they go.
+    //
+    // Same shape already validated on INVADER_1 (w8->div[5] slowest ...
+    // w1->div[2] fastest), where it fixed that voice's dominant partial.
+    //------------------------------------------------------------------------
+    // DIAG-REVERT-2026-08-08: original scrambled ladder below, uncomment to restore
+    // wire signed [4:0] inv2_tap_sum =
+    //     (inv2_div[3] ? 5'sd8 : -5'sd8) +
+    //     (inv2_div[4] ? 5'sd2 : -5'sd2) +
+    //     (inv2_div[5] ? 5'sd4 : -5'sd4) +
+    //     (inv2_div[6] ? 5'sd1 : -5'sd1);
     wire signed [4:0] inv2_tap_sum =
-        (inv2_div[3] ? 5'sd8 : -5'sd8) +
-        (inv2_div[4] ? 5'sd2 : -5'sd2) +
-        (inv2_div[5] ? 5'sd4 : -5'sd4) +
-        (inv2_div[6] ? 5'sd1 : -5'sd1);
+        (inv2_div[3] ? 5'sd8 : -5'sd8) +   // Q4, R47 10k (MSB) - base/16 = 194.8 Hz
+        (inv2_div[2] ? 5'sd4 : -5'sd4) +   // Q3, R50 22k
+        (inv2_div[1] ? 5'sd2 : -5'sd2) +   // Q2, R49 39k
+        (inv2_div[0] ? 5'sd1 : -5'sd1);    // Q1, R48 82k (LSB)
 
     wire signed [15:0] inv2_mix = inv2_tap_sum * 16'sd700;
     wire signed [15:0] inv2_out = inv2_gate ? inv2_mix : 16'sd0;
@@ -236,7 +396,15 @@ module astrob_audio (
     localparam [15:0] INV1_HALF_PERIOD_NORM = 16'd1159;  // clk_sys/(2*6674Hz)
     localparam [15:0] INV1_HALF_PERIOD_WARP = 16'd1337;  // clk_sys/(2*5784Hz), ~13.4% lower
 
-    wire [15:0] inv1_half_period = warp_active ? INV1_HALF_PERIOD_WARP : INV1_HALF_PERIOD_NORM;
+    // Warp picks the base, then the shared V ladder scales it. The two
+    // compose multiplicatively here; on the real board warp shifts U16's
+    // reference so it biases the whole ladder. Keeping the measured-and-fit
+    // per-voice warp switch rather than folding warp into V — that path's
+    // sign is still unresolved (see NOTE at end of file).
+    wire [15:0] inv1_half_period_base = warp_active ? INV1_HALF_PERIOD_WARP : INV1_HALF_PERIOD_NORM;
+
+    wire [31:0] inv1_hp_scaled   = inv1_half_period_base * v_mult;
+    wire [15:0] inv1_half_period = inv1_hp_scaled[30:15];
 
     reg [15:0] inv1_osc_cnt;
     reg        inv1_osc_out;
@@ -269,15 +437,83 @@ module astrob_audio (
         else if (inv1_osc_rise)   inv1_div <= inv1_div + 7'd1;
     end
 
-    // Same tap weights as INVADER_2 (reused for consistency -- both are
-    // approximated architectures, not per-voice-derived resistor ratios).
+    // TAPS REASSIGNED 2026-07-30. Was w8->div[3], which put the dominant
+    // partial at base/16 = 417 Hz. Measured against the board capture, the
+    // real voice's dominant partial is 104.4 Hz and ours was 416.7 Hz — a
+    // factor of almost exactly 4, i.e. the heaviest tap was two stages too
+    // fast. The measured peak list for the real voice (99.2/101.6/104.3/
+    // 106.7/109.4/208.6/312.7/417.0 Hz) contains 104.3, 208.6 and 417.0
+    // outright, and those ARE div[5], div[4] and div[3] of this 6674 Hz base.
+    // So weights descend across ascending speed, dominant on div[5]:
     wire signed [4:0] inv1_tap_sum =
-        (inv1_div[3] ? 5'sd8 : -5'sd8) +
-        (inv1_div[4] ? 5'sd2 : -5'sd2) +
-        (inv1_div[5] ? 5'sd4 : -5'sd4) +
-        (inv1_div[6] ? 5'sd1 : -5'sd1);
+        (inv1_div[5] ? 5'sd8 : -5'sd8) +   // base/64  = 104.3 Hz (dominant)
+        (inv1_div[4] ? 5'sd4 : -5'sd4) +   // base/32  = 208.6 Hz
+        (inv1_div[3] ? 5'sd2 : -5'sd2) +   // base/16  = 417.0 Hz
+        (inv1_div[2] ? 5'sd1 : -5'sd1);    // base/8   = 834.3 Hz
 
-    wire signed [15:0] inv1_mix = inv1_tap_sum * 16'sd700;
+    //------------------------------------------------------------------------
+    // INVADER_1 RETRIGGER ENVELOPE — the "WooWooWoo", built 2026-07-30.
+    //
+    // User listened to the isolated captures and reported the real voice goes
+    // "WooWooWooWooWoo" while ours was a flat "Wooooooo". They were right, and
+    // it matches the real topology: U23 free-runs and RETRIGGERS the shaped
+    // monostable U18 through Q8 — a repeating burst, not a sustained tone. The
+    // old model had no modulator at all (measured env_mod 0.015), because it
+    // borrowed INVADER_2's divided-tap architecture wholesale.
+    //
+    // Measured off ab_wavs/real_inv1.wav, band-limited to 80-130 Hz so
+    // broadband content can't bias the envelope, and excluding the clip's
+    // ~1.25 s of quiet lead-in (that lead-in is what made an earlier pass
+    // report a spurious 0.73 Hz — it biased the slow end of the FFT):
+    //   rate  = 2.56 Hz (one every 390 ms), 2nd harmonic at 5.13 Hz present
+    //           so the shape is pulse-like, not sinusoidal
+    //   depth = 93% (78% swing on the folded median)
+    //
+    // The 16 gains below ARE the measured folded envelope, normalised to its
+    // own peak. Free-running and NOT gated, matching U23 on the real board.
+    //------------------------------------------------------------------------
+    localparam [19:0] INV1_ENV_STEP = 20'd377648;  // clk_sys/(2.56Hz * 16)
+
+    reg [19:0] inv1_env_cnt;
+    reg [3:0]  inv1_env_idx;
+    always @(posedge clk_sys or posedge reset) begin
+        if (reset) begin
+            inv1_env_cnt <= INV1_ENV_STEP;
+            inv1_env_idx <= 4'd0;
+        end else if (inv1_env_cnt == 20'd0) begin
+            inv1_env_cnt <= INV1_ENV_STEP;
+            inv1_env_idx <= inv1_env_idx + 4'd1;
+        end else begin
+            inv1_env_cnt <= inv1_env_cnt - 20'd1;
+        end
+    end
+
+    reg [7:0] inv1_env;
+    always @(*) begin
+        case (inv1_env_idx)
+            4'd0:  inv1_env = 8'd224;
+            4'd1:  inv1_env = 8'd223;
+            4'd2:  inv1_env = 8'd221;
+            4'd3:  inv1_env = 8'd229;
+            4'd4:  inv1_env = 8'd224;
+            4'd5:  inv1_env = 8'd215;
+            4'd6:  inv1_env = 8'd222;
+            4'd7:  inv1_env = 8'd252;
+            4'd8:  inv1_env = 8'd232;
+            4'd9:  inv1_env = 8'd146;   // burst decays
+            4'd10: inv1_env = 8'd73;
+            4'd11: inv1_env = 8'd57;    // quietest point of the "Woo"
+            4'd12: inv1_env = 8'd97;
+            4'd13: inv1_env = 8'd170;   // retrigger
+            4'd14: inv1_env = 8'd232;
+            4'd15: inv1_env = 8'd255;
+            default: inv1_env = 8'd224;
+        endcase
+    end
+
+    wire signed [15:0] inv1_mix_raw = inv1_tap_sum * 16'sd700;
+    wire signed [24:0] inv1_mix_env = inv1_mix_raw * $signed({1'b0, inv1_env});
+    wire signed [15:0] inv1_mix     = inv1_mix_env[23:8];
     wire signed [15:0] inv1_out = inv1_gate ? inv1_mix : 16'sd0;
 
     //------------------------------------------------------------------------
@@ -303,7 +539,73 @@ module astrob_audio (
     localparam [16:0] INV3_HALF_PERIOD_NORM = 17'd71285;  // clk_sys/(2*108.5Hz)
     localparam [16:0] INV3_HALF_PERIOD_WARP = 17'd77266;  // clk_sys/(2*100.1Hz), ~7.7% lower
 
-    wire [16:0] inv3_half_period = warp_active ? INV3_HALF_PERIOD_WARP : INV3_HALF_PERIOD_NORM;
+    //------------------------------------------------------------------------
+    // INVADER_3 FM WARBLE — added 2026-08-08.
+    //
+    // The "fundamental cluster" described above is NOT a cluster: it is an FM
+    // SIDEBAND COMB, and the comb spacing is the modulation rate. Measured off
+    // ab_wavs/real_inv3.wav (48 kHz, 4.46 s, 0.046 Hz bins):
+    //   fundamental : 99.6 / 108.4 / 117.2 / 126.0 Hz   dB rel -7 / 0 / -7 / -21
+    //   3rd harmonic: 298.6 307.4 316.3 325.3 333.9 342.7 351.6, spacing ~8.8
+    //   => carrier 108.4 Hz, modulation rate 8.8 Hz
+    //
+    // It is FM, not AM, confirmed three ways:
+    //   J1/J0 = -7 dB  -> beta ~ 0.82
+    //   J2/J0 = -21 dB -> beta ~ 0.80
+    //   at 3x the harmonic the CARRIER (325.3) collapses to -24 dB while its
+    //   sidebands dominate. Deviation triples at 3x so beta3 = 2.40, and the
+    //   first Bessel null of J0 is 2.405. AM cannot null a carrier.
+    // => peak deviation = beta * f_mod = 0.8 * 8.8 = ~7.0 Hz (6.46% of carrier).
+    //
+    // Topology (external analysis, 2026-08-08): U22 sections A+B (R24 2.2M,
+    // C8/C9 0.1uF) form a slow relaxation oscillator sweeping U17's CV pin
+    // through C12/R54. A relaxation oscillator's cap voltage is a TRIANGLE,
+    // rounded by the RC -- hence a triangle modulator here, not a LUT.
+    //
+    // WARP: rate drops to 5.05 Hz (header peak list 90.1/95.2/100.1/105.2/110.3,
+    // spacing ~5.05, carrier 100.1). Deviation held at the same FRACTION of
+    // carrier (6.46%), which raises beta to ~1.28 and predicts the stronger 2nd
+    // sidebands that list shows. #unverified -- no isolated warp capture exists.
+    //------------------------------------------------------------------------
+    // 32-bit phase accumulator: inc = f_mod * 2^32 / 15468480
+    localparam [31:0] INV3_FM_INC_NORM = 32'd2443;   //  8.798 Hz
+    localparam [31:0] INV3_FM_INC_WARP = 32'd1402;   //  5.049 Hz
+    // half-period at the LOW-frequency end of the swing, and span across it.
+    // Deviation trimmed 2026-08-08 against the real capture: span 36 (+-7.0 Hz)
+    // rendered 1st sidebands at -9 dB vs the board's -7, i.e. beta_eff ~0.68 not
+    // 0.82 -- a TRIANGLE modulator spreads shallower than the sine the Bessel
+    // maths assumes, so it needs ~21% more deviation to hit the same sideband
+    // depth. +-8.5 Hz (7.84% of carrier); warp holds the same FRACTION.
+    // ...then both endpoints trimmed 0.46% to correct a SYSTEMATIC flat carrier:
+    // the triangle sweeps HALF-PERIOD linearly, which is not symmetric in
+    // FREQUENCY, so the time-average frequency sits below the mean of the two
+    // endpoints (harmonic-mean effect). Rendered 107.9 Hz vs the board's 108.4.
+    localparam [16:0] INV3_FM_HP_LO_NORM = 17'd77060; // 100.4 Hz endpoint
+    localparam [16:0] INV3_FM_HP_LO_WARP = 17'd83454; //  92.7 Hz endpoint
+    localparam [7:0]  INV3_FM_SPAN_NORM  = 8'd44;     // *255 -> 66197 = 116.8 Hz
+    localparam [7:0]  INV3_FM_SPAN_WARP  = 8'd48;     // *255 -> 71600 = 108.0 Hz
+
+    wire [31:0] inv3_fm_inc   = warp_active ? INV3_FM_INC_WARP   : INV3_FM_INC_NORM;
+    wire [16:0] inv3_fm_hp_lo = warp_active ? INV3_FM_HP_LO_WARP : INV3_FM_HP_LO_NORM;
+    wire [7:0]  inv3_fm_span  = warp_active ? INV3_FM_SPAN_WARP  : INV3_FM_SPAN_NORM;
+
+    reg [31:0] inv3_fm_phase;
+    always @(posedge clk_sys or posedge reset) begin
+        if (reset) inv3_fm_phase <= 32'd0;
+        else       inv3_fm_phase <= inv3_fm_phase + inv3_fm_inc;
+    end
+
+    // triangle 0..255 from the accumulator (free-running, like U22 on the board)
+    wire [7:0] inv3_fm_ramp = inv3_fm_phase[30:23];
+    wire [7:0] inv3_fm_tri  = inv3_fm_phase[31] ? ~inv3_fm_ramp : inv3_fm_ramp;
+    wire [15:0] inv3_fm_off = inv3_fm_tri * inv3_fm_span;
+
+    // DIAG-REVERT-2026-08-08: original static base below, uncomment to restore
+    // wire [16:0] inv3_half_period_base = warp_active ? INV3_HALF_PERIOD_WARP : INV3_HALF_PERIOD_NORM;
+    wire [16:0] inv3_half_period_base = inv3_fm_hp_lo - {1'b0, inv3_fm_off};
+
+    wire [32:0] inv3_hp_scaled   = inv3_half_period_base * v_mult;
+    wire [16:0] inv3_half_period = inv3_hp_scaled[31:15];
 
     reg [16:0] inv3_osc_cnt;
     reg        inv3_osc_out;
@@ -335,15 +637,11 @@ module astrob_audio (
     // U38.4), slowly warbled by U37/U28's output rather than harmonically
     // stacked with it.
     //
-    // KNOWN GAP: that slow-warble modulation is NOT modeled here -- too
-    // analog-dependent to derive without simulation. Measured "Invader 4"
-    // test audio (Claude/astrob_wav_markers_2026-07-26.md, 02:29.375-
-    // 02:33.700: 681.7/726.5/736.5/766.3/776.2/786.2/806.1/890.7 Hz, much
-    // higher register than Invaders 1-3) is consistent with a warbling
-    // oscillator's peak frequency drifting across the ~4.3s hold rather
-    // than a static multi-tap stack. Modeled as a single gated oscillator
-    // at ~771 Hz (average of the measured peaks) -- right register,
-    // missing the warble.
+    // (Was a KNOWN GAP: the warble is now built, see below. The old model was
+    // a single gated oscillator at ~771 Hz -- the average of the measured
+    // peaks 681.7...890.7 Hz -- which put it in the right register but made it
+    // a motionless tone. Averaging the peaks was the mistake: that spread
+    // wasn't measurement scatter, it WAS the warble.)
     //
     // No direct WARP path in the netlist for this voice (only the
     // shared-V path, like INVADER_2) -- measured warp shift ("Warp
@@ -351,19 +649,56 @@ module astrob_audio (
     // likely measurement noise. Not modeled; same voice used regardless
     // of I_WARP, consistent with INVADER_2's treatment.
     //------------------------------------------------------------------------
-    localparam [13:0] INV4_HALF_PERIOD = 14'd10028;  // clk_sys/(2*771Hz)
+    // WARBLE BUILT 2026-07-30 — this was the "KNOWN GAP" above. U37 free-runs
+    // (never gated) clocking U28, whose output drives U38's CONTROL VOLTAGE.
+    // Recovered the modulator's actual SHAPE from the board capture rather
+    // than inferring it from harmonic ratios: took the instantaneous-frequency
+    // track of the isolated "Invader 4" segment and folded it over the
+    // modulation period. Result is NOT the staircase/sawtooth the harmonics
+    // suggested — it's a clean TWO-LEVEL square at 39.79 Hz alternating
+    // between ~704 Hz and ~886 Hz (the apparent ramps between the two plateaus
+    // are analysis smearing: a 16 ms window can't resolve edges on a 25 ms
+    // period). That's a single CD4024 tap square-waving the control pin.
+    // Reproduce with verilator/vgen/fm_shape.py.
+    //
+    // The old fixed 771 Hz sat near the middle of this and never moved, which
+    // is why a held gate sounded like a steady beep: measured env_mod on the
+    // real voice is 0.389, ours was 0.000.
+    localparam [17:0] INV4_WARBLE_HALF = 18'd194376;  // clk_sys/(2*39.79Hz)
+    localparam [13:0] INV4_HP_LO_PITCH = 14'd10986;   // 704 Hz plateau
+    localparam [13:0] INV4_HP_HI_PITCH = 14'd8729;    // 886 Hz plateau
+
+    reg [17:0] inv4_warble_cnt;
+    reg        inv4_warble;
+    always @(posedge clk_sys or posedge reset) begin
+        if (reset) begin
+            inv4_warble_cnt <= INV4_WARBLE_HALF;
+            inv4_warble     <= 1'b0;
+        end else if (inv4_warble_cnt == 18'd0) begin
+            inv4_warble_cnt <= INV4_WARBLE_HALF;
+            inv4_warble     <= ~inv4_warble;   // U37/U28 free-run: NOT gated
+        end else begin
+            inv4_warble_cnt <= inv4_warble_cnt - 18'd1;
+        end
+    end
+
+    wire [13:0] inv4_half_period_base =
+        inv4_warble ? INV4_HP_HI_PITCH : INV4_HP_LO_PITCH;
+
+    wire [29:0] inv4_hp_scaled   = inv4_half_period_base * v_mult;
+    wire [13:0] inv4_half_period = inv4_hp_scaled[28:15];
 
     reg [13:0] inv4_osc_cnt;
     reg        inv4_osc_out;
     always @(posedge clk_sys or posedge reset) begin
         if (reset) begin
-            inv4_osc_cnt <= INV4_HALF_PERIOD;
+            inv4_osc_cnt <= INV4_HP_LO_PITCH;
             inv4_osc_out <= 1'b0;
         end else if (!inv4_gate) begin
-            inv4_osc_cnt <= INV4_HALF_PERIOD;
+            inv4_osc_cnt <= inv4_half_period;
             inv4_osc_out <= 1'b0;
         end else if (inv4_osc_cnt == 14'd0) begin
-            inv4_osc_cnt <= INV4_HALF_PERIOD;
+            inv4_osc_cnt <= inv4_half_period;
             inv4_osc_out <= ~inv4_osc_out;
         end else begin
             inv4_osc_cnt <= inv4_osc_cnt - 14'd1;
@@ -377,12 +712,23 @@ module astrob_audio (
     //   $3E: I_ASTROIDS, I_REFILL
     //   $3F: I_LASER_1, I_LASER_2, I_SHORT_EXPL, I_LONG_EXPL, I_BONUS,
     //        I_SONAR
-    //   I_ATTACK_RATE/I_RATE_RESET ($3F bits 4/5) are control inputs to
-    //   the not-yet-built V generator (CD4017 ladder + warp-summing
-    //   op-amp), not standalone voices -- see astrob_audio_board_notes.
+    //   ($3F bits 4/5, I_ATTACK_RATE/I_RATE_RESET, are NOT voices — they
+    //   drive the V generator, which is now built at the top of this file.)
     //   MAME's own nl_astrob.cpp header documents SONAR/BONUS triggering
     //   as broken in MAME itself — don't treat MAME audio as ground truth
     //   for those two when they're eventually built.
+    //
+    // NOTE — unresolved warp-via-V sign (does NOT block anything above).
+    // On the schematic, I_WARP sums through R164 (10k) into U16 pin 5,
+    // shifting the ladder's reference from ~8.16 V toward ~6.19 V, which by
+    // the 555 control-voltage equation should RAISE invader pitch. But the
+    // measured "Warp Invader" captures show pitch going DOWN (INV1 -13.4%,
+    // INV3 -7.7%). Those two voices also have their own direct W paths
+    // (U30.5 / U30.9) which is what the per-voice warp switches above are
+    // fit to, so the discrepancy is confined to the shared-V leg and the
+    // fitted behavior is the one that matches real audio. Leaving warp out
+    // of the V generator until that sign is settled — do not "fix" the
+    // per-voice switches to match the derivation without new measurements.
     //------------------------------------------------------------------------
 
     //------------------------------------------------------------------------
