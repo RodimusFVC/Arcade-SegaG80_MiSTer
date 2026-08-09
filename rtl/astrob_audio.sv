@@ -347,7 +347,73 @@ module astrob_audio (
         (inv2_div[1] ? 5'sd2 : -5'sd2) +   // Q2, R49 39k
         (inv2_div[0] ? 5'sd1 : -5'sd1);    // Q1, R48 82k (LSB)
 
-    wire signed [15:0] inv2_mix = inv2_tap_sum * 16'sd700;
+    //------------------------------------------------------------------------
+    // INVADER_2 OSC3 AMPLITUDE ENVELOPE — added 2026-08-08.
+    //
+    // Closes the standing "AM depth 0.047 vs board 0.416, unexplained" item.
+    // The cause: OSC3 was modelled ONLY as a counter reset, and resetting a
+    // counter changes the WAVEFORM, not its AMPLITUDE. The board's ~77% AM
+    // therefore cannot come from the reset we already had -- a gain element was
+    // simply missing. INV2_RESET_PERIOD itself was never wrong (15.30 Hz vs the
+    // board's measured 15.29).
+    //
+    // Not CPU gate-strobing (the ambiguity flagged 2026-07-30 as needing the
+    // opposite fix): the AM rate lands exactly on OSC3, a board oscillator, so
+    // it is intrinsic to the circuit. Driven from inv2_reset_pulse for that
+    // reason -- envelope and divider reset share one source on the board too.
+    //
+    // Measured off ab_wavs/real_inv2.wav, Hilbert envelope median-folded at
+    // 15.29 Hz into 16 bins: a high plateau, a drop to ~45%, then a sharp snap
+    // back at the end of the cycle. Folded depth 65%. The 16 gains below ARE
+    // that measured envelope, normalised to its own peak.
+    //------------------------------------------------------------------------
+    localparam [16:0] INV2_ENV_STEP = 17'd63230;   // INV2_RESET_PERIOD/16
+
+    reg [16:0] inv2_env_cnt;
+    reg [3:0]  inv2_env_idx;
+    always @(posedge clk_sys or posedge reset) begin
+        if (reset) begin
+            inv2_env_cnt <= INV2_ENV_STEP;
+            inv2_env_idx <= 4'd0;
+        end else if (inv2_reset_pulse) begin      // resync to OSC3, as on the board
+            inv2_env_cnt <= INV2_ENV_STEP;
+            inv2_env_idx <= 4'd0;
+        end else if (inv2_env_cnt == 17'd0) begin
+            inv2_env_cnt <= INV2_ENV_STEP;
+            inv2_env_idx <= inv2_env_idx + 4'd1;
+        end else begin
+            inv2_env_cnt <= inv2_env_cnt - 17'd1;
+        end
+    end
+
+    reg [7:0] inv2_env;
+    always @(*) begin
+        case (inv2_env_idx)
+            4'd0:  inv2_env = 8'd240;
+            4'd1:  inv2_env = 8'd255;   // peak
+            4'd2:  inv2_env = 8'd228;
+            4'd3:  inv2_env = 8'd207;
+            4'd4:  inv2_env = 8'd206;
+            4'd5:  inv2_env = 8'd236;
+            4'd6:  inv2_env = 8'd212;
+            4'd7:  inv2_env = 8'd156;   // decay begins
+            4'd8:  inv2_env = 8'd120;
+            4'd9:  inv2_env = 8'd116;
+            4'd10: inv2_env = 8'd119;
+            4'd11: inv2_env = 8'd89;    // quietest point
+            4'd12: inv2_env = 8'd104;
+            4'd13: inv2_env = 8'd106;
+            4'd14: inv2_env = 8'd243;   // snap back
+            4'd15: inv2_env = 8'd241;
+            default: inv2_env = 8'd240;
+        endcase
+    end
+
+    // DIAG-REVERT-2026-08-08: original unmodulated mix below, uncomment to restore
+    // wire signed [15:0] inv2_mix = inv2_tap_sum * 16'sd700;
+    wire signed [15:0] inv2_mix_raw = inv2_tap_sum * 16'sd700;
+    wire signed [24:0] inv2_mix_env = inv2_mix_raw * $signed({1'b0, inv2_env});
+    wire signed [15:0] inv2_mix     = inv2_mix_env[23:8];
     wire signed [15:0] inv2_out = inv2_gate ? inv2_mix : 16'sd0;
 
     // Gate signals for the other three invaders. Same pull-up +
@@ -488,26 +554,69 @@ module astrob_audio (
         end
     end
 
+    //------------------------------------------------------------------------
+    // ENVELOPE SHAPE REFIT 2026-08-08 — median fold replaced by a sideband fit.
+    //
+    // The 2026-07-30 LUT (commented out below) was built by median-folding the
+    // capture. It encoded a NARROW DEEP DIP, and this note's own warning says
+    // why that is wrong: folding "averages away the deepest dips because their
+    // timing jitters." The consequence is measurable -- 78% peak-to-peak depth,
+    // yet the rendered +-1 sidebands came out at -16 dB against the board's -8,
+    // because a narrow dip scatters its energy across many sidebands instead of
+    // concentrating it in +-1.
+    //
+    // 🔑 The old LUT was also PURE AM, and pure AM is provably wrong here: it
+    // scales every partial identically, and the render showed exactly that --
+    // -24/-17/-16/0 repeated VERBATIM at 104, 208 and 417 Hz. The real board's
+    // sideband pattern differs per partial, which AM alone cannot do.
+    //
+    // Refit against the measured sideband series instead of the fold. Board,
+    // dB rel carrier: +-1 -8, +-2 -13.5, +-3 -17.5, +-4 -25 -- a ~1/n falloff,
+    // i.e. a SAWTOOTH: sharp attack then decay. That is exactly the documented
+    // topology (U23 retriggers monostable U18 = a repeating burst). Two-param
+    // fit (decay rate, depth) lands at k=0.70, mean error 1.66 dB:
+    //     fitted +-1..+-4 = -8.4 / -14.2 / -17.5 / -19.6
+    // ⚠️ The depth parameter pinned at its search CEILING (1.00), so the fit
+    // wanted more modulation than is physically available -- treat the decay
+    // depth as a lower bound, and expect +-4 (-19.6 vs -25) to stay off because
+    // the real decay is slightly smoother than a pure ramp.
+    // ⚠️ Sim-fitted only. The user's ear is the arbiter on this voice.
+    //------------------------------------------------------------------------
+    // DIAG-REVERT-2026-08-08: original median-fold LUT below, uncomment to restore
+    // reg [7:0] inv1_env;
+    // always @(*) begin
+    //     case (inv1_env_idx)
+    //         4'd0:  inv1_env = 8'd224;   4'd1:  inv1_env = 8'd223;
+    //         4'd2:  inv1_env = 8'd221;   4'd3:  inv1_env = 8'd229;
+    //         4'd4:  inv1_env = 8'd224;   4'd5:  inv1_env = 8'd215;
+    //         4'd6:  inv1_env = 8'd222;   4'd7:  inv1_env = 8'd252;
+    //         4'd8:  inv1_env = 8'd232;   4'd9:  inv1_env = 8'd146;
+    //         4'd10: inv1_env = 8'd73;    4'd11: inv1_env = 8'd57;
+    //         4'd12: inv1_env = 8'd97;    4'd13: inv1_env = 8'd170;
+    //         4'd14: inv1_env = 8'd232;   4'd15: inv1_env = 8'd255;
+    //         default: inv1_env = 8'd224;
+    //     endcase
+    // end
     reg [7:0] inv1_env;
     always @(*) begin
         case (inv1_env_idx)
-            4'd0:  inv1_env = 8'd224;
-            4'd1:  inv1_env = 8'd223;
-            4'd2:  inv1_env = 8'd221;
-            4'd3:  inv1_env = 8'd229;
-            4'd4:  inv1_env = 8'd224;
-            4'd5:  inv1_env = 8'd215;
-            4'd6:  inv1_env = 8'd222;
-            4'd7:  inv1_env = 8'd252;
-            4'd8:  inv1_env = 8'd232;
-            4'd9:  inv1_env = 8'd146;   // burst decays
-            4'd10: inv1_env = 8'd73;
-            4'd11: inv1_env = 8'd57;    // quietest point of the "Woo"
-            4'd12: inv1_env = 8'd97;
-            4'd13: inv1_env = 8'd170;   // retrigger
-            4'd14: inv1_env = 8'd232;
-            4'd15: inv1_env = 8'd255;
-            default: inv1_env = 8'd224;
+            4'd0:  inv1_env = 8'd255;   // attack — monostable retriggered
+            4'd1:  inv1_env = 8'd232;
+            4'd2:  inv1_env = 8'd211;
+            4'd3:  inv1_env = 8'd190;
+            4'd4:  inv1_env = 8'd170;
+            4'd5:  inv1_env = 8'd151;
+            4'd6:  inv1_env = 8'd133;
+            4'd7:  inv1_env = 8'd115;
+            4'd8:  inv1_env = 8'd99;
+            4'd9:  inv1_env = 8'd83;
+            4'd10: inv1_env = 8'd67;
+            4'd11: inv1_env = 8'd53;
+            4'd12: inv1_env = 8'd39;
+            4'd13: inv1_env = 8'd25;
+            4'd14: inv1_env = 8'd12;
+            4'd15: inv1_env = 8'd0;     // fully decayed, then retriggers
+            default: inv1_env = 8'd255;
         endcase
     end
 
