@@ -10,11 +10,15 @@ Regenerate at any time:  verilator/vgen/render_all.sh
 NOT rendered because they are not ported yet (silent in the RTL):
   LASER_1, LASER_2, SHORT_EXPL, LONG_EXPL, ASTROIDS, REFILL, BONUS, SONAR
 
-NOT rendered because the V generator is absent as of the 2026-08-09 rebase:
-  invN_ladder_sweep.wav  the CD4017 attack-rate pitch staircase. The RTL reads
-                         latch_3f zero times, so there is nothing to sweep.
-                         Re-enable in tb_wavdump.cpp once V is ported forward
-                         from git 5b30d49.
+  invN_ladder_sweep.wav  the CD4017 attack-rate pitch staircase. Re-enabled
+                         2026-08-10 (a V generator is back in the RTL).
+                         Stimulus is 10 ROM-style strobes on $3F bit 4, 0.8 s
+                         apart, because on the real board the staircase
+                         advances ONE STEP PER PULSE -- the pitch tracks the
+                         invader count, which only the game ROM knows. Expect
+                         10 discrete steps. A continuous wrapping sweep here
+                         means the RTL is free-running its own staircase
+                         instead of being clocked by the port.
 
 Caveat: these are the raw mixed output of astrob_audio.sv. The real board has
 analog filtering after this point that is not modelled, and MAME applies its

@@ -32,7 +32,12 @@
 //
 //  clk_sys = 15.468480 MHz (SegaG80 core system clock).
 //
-//  REVISION 2026-08-09 (this file): four invader voices reworked per
+//  REVISION 2026-08-09b (this file): V GENERATOR ADDED — $3F bits 4/5
+//  (ATTACK_RATE / RATE_RESET) now drive the CD4017 staircase; all four
+//  invader pitches step through 10 levels per the R152-R161 ladder. Also:
+//  free-run fix (modulators no longer restart on gate). See V GENERATOR
+//  block for the warp-polarity open question.
+//  PRIOR REVISION 2026-08-09: four invader voices reworked per
 //  sideband analysis + netlist re-derivation. Every constant below still
 //  bakes in V ~= 7.6V (the attack-rate staircase parked at Q0, which is
 //  where all board captures to date were taken). When the V generator is
@@ -96,6 +101,81 @@ module astrob_audio (
     wire warp_active = latch_3e[7];
 
     //------------------------------------------------------------------------
+    // V GENERATOR — NEW 2026-08-09. The attack-rate staircase.
+    //
+    // Board: I_ATTACK_RATE (LO on $3F bit4 path via U26 7407 OC) releases a
+    // CD4011 gate oscillator (U21, R166=1M, C67=0.05u, ~14.3 Hz) which
+    // clocks U15 (CD4017, decade, wraps 0..9). I_RATE_RESET ($3F bit5 via
+    // U31 7406): bit LOW -> U15.15 pulled to +12V -> counter HELD at 0.
+    // Each decoded output drives one ladder resistor (R161 120k .. R152
+    // 22k) into U16's summing node; V = U16.7 steps 7.57V .. 4.93V.
+    // Every voice CV rides V, so pitch rises through the wave — the
+    // level-1 accelerando this file previously lacked (all constants were
+    // captured with the staircase stuck at step 0 on the faulty board).
+    //
+    // Implementation: vstep 0..9 indexes per-voice half-period ROMs,
+    // generated from the solved op-amp voltages + 555 CV equations,
+    // normalized so step 0 = the existing capture-validated constants
+    // (nothing already tuned changes at step 0).
+    //
+    // ⚠ WARP-POLARITY OPEN QUESTION: the schematic-solved warp path
+    // (I_WARP/R164 shifting U16 pin 5) moves V DOWN under warp -> pitch
+    // UP, which CONTRADICTS the capture-derived 104.3->90.3 Hz drop this
+    // file encodes. Both can't be right; the captures came from the
+    // faulty board whose U31 (the warp inverter's package) was suspect.
+    // This file keeps the capture-derived warp bases and applies the
+    // step tables on top. To resolve: on a WORKING board, capture INV4
+    // with warp on at a known step; if pitch rises ~30%, switch the warp
+    // tables to the schematic solution (values in project notes).
+    //------------------------------------------------------------------------
+    wire attack_run  = ~latch_3f[4];   // bit LOW = oscillator released
+    wire rate_reset  = ~latch_3f[5];   // bit LOW = counter held at 0
+
+    localparam [19:0] VSTEP_HALF = 20'd540856;   // clk/(2*14.3Hz)
+    reg [19:0] vclk_cnt;
+    reg        vclk_out, vclk_d;
+    always @(posedge clk_sys or posedge reset) begin
+        if (reset) begin
+            vclk_cnt <= VSTEP_HALF; vclk_out <= 1'b0;
+        end else if (!attack_run) begin
+            vclk_cnt <= VSTEP_HALF;               // gate osc held (R148 high)
+        end else if (vclk_cnt == 20'd0) begin
+            vclk_cnt <= VSTEP_HALF; vclk_out <= ~vclk_out;
+        end else begin
+            vclk_cnt <= vclk_cnt - 20'd1;
+        end
+    end
+    always @(posedge clk_sys) vclk_d <= vclk_out;
+    wire vclk_rise = vclk_out & ~vclk_d;
+
+    reg [3:0] vstep;                              // U15 CD4017: 0..9, wraps
+    always @(posedge clk_sys or posedge reset) begin
+        if (reset)              vstep <= 4'd0;
+        else if (rate_reset)    vstep <= 4'd0;
+        else if (vclk_rise)     vstep <= (vstep == 4'd9) ? 4'd0 : vstep + 4'd1;
+    end
+
+    // ---- per-step half-period ROMs (step 0 == legacy constants) ----
+    reg [17:0] rom_i1n, rom_i1w;   // INV1 period (norm/warp)
+    reg [15:0] rom_i2;             // INV2 osc half
+    reg [16:0] rom_i3n, rom_i3w;   // INV3 center half (norm/warp)
+    reg [16:0] rom_i4h, rom_i4l;   // INV4 endpoints (682Hz / 890Hz)
+    always @* begin
+        case (vstep)
+        4'd0: begin rom_i1n=18'd148307; rom_i1w=18'd171299; rom_i2=16'd2481; rom_i3n=17'd71284; rom_i3w=17'd77265; rom_i4h=17'd11340; rom_i4l=17'd8690; end
+        4'd1: begin rom_i1n=18'd138564; rom_i1w=18'd160046; rom_i2=16'd2397; rom_i3n=17'd68863; rom_i3w=17'd74641; rom_i4h=17'd10955; rom_i4l=17'd8395; end
+        4'd2: begin rom_i1n=18'd129138; rom_i1w=18'd149158; rom_i2=16'd2310; rom_i3n=17'd66359; rom_i3w=17'd71927; rom_i4h=17'd10557; rom_i4l=17'd8090; end
+        4'd3: begin rom_i1n=18'd125302; rom_i1w=18'd144728; rom_i2=16'd2276; rom_i3n=17'd65408; rom_i3w=17'd70895; rom_i4h=17'd10405; rom_i4l=17'd7974; end
+        4'd4: begin rom_i1n=18'd118276; rom_i1w=18'd136612; rom_i2=16'd2213; rom_i3n=17'd63584; rom_i3w=17'd68919; rom_i4h=17'd10115; rom_i4l=17'd7751; end
+        4'd5: begin rom_i1n=18'd109414; rom_i1w=18'd126376; rom_i2=16'd2139; rom_i3n=17'd61443; rom_i3w=17'd66599; rom_i4h=17'd9775;  rom_i4l=17'd7490; end
+        4'd6: begin rom_i1n=18'd100707; rom_i1w=18'd116320; rom_i2=16'd2062; rom_i3n=17'd59249; rom_i3w=17'd64220; rom_i4h=17'd9425;  rom_i4l=17'd7223; end
+        4'd7: begin rom_i1n=18'd89544;  rom_i1w=18'd103426; rom_i2=16'd1960; rom_i3n=17'd56323; rom_i3w=17'd61049; rom_i4h=17'd8960;  rom_i4l=17'd6866; end
+        4'd8: begin rom_i1n=18'd82357;  rom_i1w=18'd95125;  rom_i2=16'd1896; rom_i3n=17'd54474; rom_i3w=17'd59044; rom_i4h=17'd8666;  rom_i4l=17'd6641; end
+        default: begin rom_i1n=18'd76855; rom_i1w=18'd88770; rom_i2=16'd1846; rom_i3n=17'd53049; rom_i3w=17'd57500; rom_i4h=17'd8439; rom_i4l=17'd6467; end
+        endcase
+    end
+
+    //------------------------------------------------------------------------
     // INVADER_1 — REWORKED 2026-08-09. PWM model.
     //
     // Real circuit: U23 555 astable (R85=150k, R86=10k, C38=0.1u) sets a
@@ -148,16 +228,20 @@ module astrob_audio (
                                                        // (was 0.15..0.35): same mean,
                                                        // double the swing
 
-    wire [17:0] inv1_period  = warp_active ? INV1_PER_WARP     : INV1_PER_NORM;
+    // V-STEP 2026-08-09: period now comes from the staircase ROM.
+    // (INV1_PER_NORM/WARP retained above as documentation of step 0.)
+    wire [17:0] inv1_period  = warp_active ? rom_i1w : rom_i1n;
     wire [15:0] inv1_envstep = warp_active ? INV1_ENVSTEP_WARP : INV1_ENVSTEP_NORM;
 
     // 8-bit sawtooth envelope (U22-C/D + Q8), one ramp per envelope cycle
     reg [15:0] inv1_env_pre;
     reg  [7:0] inv1_env;
     always @(posedge clk_sys or posedge reset) begin
+        // FREE-RUN FIX 2026-08-09: U22-C/D is not gated on the board — only
+        // the 555 RESET pins are. Clearing this on !gate restarted the march
+        // envelope from minimum duty on every gate pulse; with the retuned
+        // W_MIN=0.05 that made pulsed-gate games nearly silent (level-1 bug).
         if (reset) begin
-            inv1_env <= 8'd0;  inv1_env_pre <= 16'd0;
-        end else if (!inv1_gate) begin
             inv1_env <= 8'd0;  inv1_env_pre <= 16'd0;
         end else if (inv1_env_pre >= inv1_envstep) begin
             inv1_env <= inv1_env + 8'd1;   // wraps: sawtooth
@@ -234,7 +318,7 @@ module astrob_audio (
             inv2_osc_cnt <= INV2_HALF_PERIOD;
             inv2_osc_out <= 1'b0;
         end else if (inv2_osc_cnt == 16'd0) begin
-            inv2_osc_cnt <= INV2_HALF_PERIOD;
+            inv2_osc_cnt <= rom_i2;               // V-STEP 2026-08-09
             inv2_osc_out <= ~inv2_osc_out;
         end else begin
             inv2_osc_cnt <= inv2_osc_cnt - 16'd1;
@@ -255,9 +339,7 @@ module astrob_audio (
         if (reset) begin
             inv2_g_cnt <= INV2_GATE_HALF;
             inv2_hold  <= 1'b0;
-        end else if (!inv2_gate) begin
-            inv2_g_cnt <= INV2_GATE_HALF; // resync gate phase on voice start
-            inv2_hold  <= 1'b0;
+        // FREE-RUN FIX 2026-08-09: OSC3 free-runs; no phase resync on gate.
         end else if (inv2_g_cnt == 20'd0) begin
             inv2_g_cnt <= INV2_GATE_HALF;
             inv2_hold  <= ~inv2_hold;
@@ -310,9 +392,8 @@ module astrob_audio (
     reg        inv3_lfo_dir;
     always @(posedge clk_sys or posedge reset) begin
         // Async-reset branch must test ONLY `reset` (Quartus 17.0 error 10200).
+        // FREE-RUN FIX 2026-08-09: U22-A/B free-runs on the board (see INV1).
         if (reset) begin
-            inv3_lfo <= 8'd128;  inv3_lfo_dir <= 1'b0;  inv3_lfo_pre <= 21'd0;
-        end else if (!inv3_gate) begin
             inv3_lfo <= 8'd128;  inv3_lfo_dir <= 1'b0;  inv3_lfo_pre <= 21'd0;
         end else if (inv3_lfo_pre >= inv3_lfo_step) begin
             inv3_lfo_pre <= 21'd0;
@@ -328,7 +409,8 @@ module astrob_audio (
         end
     end
 
-    wire [16:0] inv3_per_ctr = warp_active ? INV3_PER_CTR_W : INV3_PER_CTR_N;
+    // V-STEP 2026-08-09: center from staircase ROM (constants above = step 0).
+    wire [16:0] inv3_per_ctr = warp_active ? rom_i3w : rom_i3n;
     // half = center + dev*(lfo-128)/128
     wire signed [17:0] inv3_lfo_c = $signed({10'd0, inv3_lfo}) - 18'sd128;
     wire signed [35:0] inv3_dev_p = $signed({19'd0, INV3_PER_DEV}) * inv3_lfo_c;
@@ -410,8 +492,9 @@ module astrob_audio (
 
     // linear interp between endpoints (exact clk/f per code would be a
     // 16-entry ROM; linear is within ~1% here)
-    wire [21:0] inv4_span = (INV4_HALF_HI - INV4_HALF_LO) * inv4_code;
-    wire [16:0] inv4_half = INV4_HALF_HI - inv4_span[20:4];   // /15 ~= >>4 - ok at this tolerance
+    // V-STEP 2026-08-09: endpoints from staircase ROM (constants above = step 0).
+    wire [21:0] inv4_span = (rom_i4h - rom_i4l) * inv4_code;
+    wire [16:0] inv4_half = rom_i4h - inv4_span[20:4];   // /15 ~= >>4 - ok at this tolerance
 
     reg [16:0] inv4_osc_cnt;
     reg        inv4_osc_out;

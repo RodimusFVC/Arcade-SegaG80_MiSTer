@@ -1,5 +1,7 @@
 set_global_assignment -name VHDL_INPUT_VERSION VHDL_2008
 
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/tb_astrob.sv
+
 set_global_assignment -name SYSTEMVERILOG_FILE Arcade-SegaG80.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/SegaG80.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/SegaG80_CPU.sv
