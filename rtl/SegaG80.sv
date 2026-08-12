@@ -25,7 +25,16 @@ module SegaG80 (
     input                p2_fire1, p2_fire2,
     input                p2_start, p2_coin,
 
-    input                service,      // edge triggers Z80 NMI
+    // SELFTEST-SPLIT-2026-08-11: these are TWO different physical switches on
+    // a real cabinet -- see AstroBlaster manual p.14 ("red self-test switch
+    // located on the CPU board") vs p.10 ("U9 is the input port for the coin
+    // switches and service switch"). MAME models them as two separate ports:
+    // segag80r.cpp:643 IPT_SERVICE1 (a port bit, MAME default key 9) and
+    // segag80r.cpp:708 SERVICESW / PORT_SERVICE_NO_TOGGLE (NMI, MAME key F2,
+    // never read as a port). They were previously collapsed onto one signal,
+    // so no key could assert self-test without also adding a service credit.
+    input                service,      // service CREDIT -> SERVICE1 port bit
+    input                self_test,    // CPU-board switch, edge -> Z80 NMI
 
     // DIP banks (active-LOW per MAME)
     input          [7:0] dip_sw0, dip_sw1, dip_sw2, dip_sw3,
@@ -113,6 +122,7 @@ SegaG80_CPU cpu_board (
     .clk_sys       (clk_sys),
     .pause         (pause),
     .service       (service),
+    .self_test     (self_test),
 
     .p1_up(p1_up), .p1_down(p1_down), .p1_left(p1_left), .p1_right(p1_right),
     .p1_fire1(p1_fire1), .p1_fire2(p1_fire2),

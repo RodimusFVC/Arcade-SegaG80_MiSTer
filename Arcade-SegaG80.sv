@@ -381,6 +381,7 @@ reg btn_1p_start = 0;
 reg btn_2p_start = 0;
 reg btn_pause    = 0;
 reg btn_service  = 0;
+reg btn_selftest = 0;
 
 wire pressed = ps2_key[9];
 wire [7:0] code = ps2_key[7:0];
@@ -393,7 +394,8 @@ always @(posedge CLK_SYS) begin
 			'h1E: btn_2p_start <= pressed; // 2
 			'h2E: btn_coin1    <= pressed; // 5
 			'h36: btn_coin2    <= pressed; // 6
-			'h46: btn_service  <= pressed; // 9
+			'h46: btn_service  <= pressed; // 9  = SERVICE1 credit (MAME default key)
+				'h06: btn_selftest <= pressed; // F2 = CPU-board self-test switch (MAME default key)
 			'h4D: btn_pause    <= pressed; // P
 
 			'h75: btn_up      <= pressed; // up
@@ -449,6 +451,9 @@ wire m_coin2    = btn_coin2;
 // No "Service" slot in the 8-slot template (no sibling core in this vault
 // exposes Service as a mappable gamepad button either) -- keyboard-only.
 wire m_service  = btn_service;
+// SELFTEST-SPLIT-2026-08-11: separate input, matching the real cabinet's red
+// CPU-board switch (AstroBlaster manual p.14) and MAME's SERVICESW port.
+wire m_selftest = btn_selftest;
 wire m_pause    = btn_pause    | joystick_0[11];
 
 // PAUSE SYSTEM
@@ -561,7 +566,8 @@ SegaG80 g80_inst
 	.p2_start(m_start2),
 	.p2_coin (m_coin2),
 
-	.service (m_service),
+	.service   (m_service),
+	.self_test (m_selftest),
 
 	// DIP banks (active-LOW, MAME convention)
 	.dip_sw0 (dip_sw[0]),

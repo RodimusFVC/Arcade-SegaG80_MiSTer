@@ -11,7 +11,9 @@ module SegaG80_CPU (
     input              clk_sys,       // 15.468480 MHz
     input        [2:0] game_id,       // 0=ASTROB,1=MONSTERB,2=SPACEOD,3=005,4=SINDBADM,5=PIGNEWT
     input              pause,
-    input              service,       // active HIGH, edge → NMI
+    // SELFTEST-SPLIT-2026-08-11: two distinct switches on real hardware.
+    input              service,       // active HIGH, level -> SERVICE1 port bit
+    input              self_test,     // active HIGH, edge  -> Z80 NMI
 
     // Controls
     input              p1_up, p1_down, p1_left, p1_right,
@@ -166,18 +168,28 @@ wire cpu_wait = (ws_cnt != 2'd0);
 // NMI from service switch — edge-triggered pulse
 // MAME segag80r.cpp:375 INPUT_CHANGED_MEMBER(service_switch) pulse_input_line(NMI)
 //----------------------------------------------------------------------------
-reg service_d, nmi_pulse;
+// SELFTEST-SPLIT-2026-08-11: driven by self_test (the CPU-board red switch),
+// NOT by service. Was `service` -- which meant the panel service button also
+// fired the NMI, and no input could do one without the other.
+reg selftest_d, nmi_pulse;
 always @(posedge clk_sys or posedge reset) begin
     if (reset) begin
-        service_d <= 1'b0;
-        nmi_pulse <= 1'b0;
+        selftest_d <= 1'b0;
+        nmi_pulse  <= 1'b0;
     end else begin
-        service_d <= service;
-        nmi_pulse <= service & ~service_d;   // rising edge
+        selftest_d <= self_test;
+        nmi_pulse  <= self_test & ~selftest_d;   // rising edge
     end
 end
 wire nmi_n_internal;
-// Hold NMI low for one ce_cpu cycle after rising edge.
+// Hold NMI_n low for at least one clk_sys cycle so T80 sees the falling edge.
+// NOTE (verified 2026-08-11, T80.vhd:1236-1242): T80's NMI edge detector sits
+// OUTSIDE its `if CEN = '1'` block -- it samples NMI_n on every clk_sys edge
+// and latches NMI_s until the NMI is serviced, matching a real Z80's internal
+// latch and MAME's pulse_input_line(INPUT_LINE_NMI, attotime::zero). So the
+// hold does NOT need to align with ce_cpu/CEN; any >=1 clk_sys low pulse is
+// captured. Do not "fix" this to track CEN -- that was tried and was based on
+// a misreading of T80.
 reg nmi_hold;
 always @(posedge clk_sys or posedge reset) begin
     if (reset)            nmi_hold <= 1'b0;
