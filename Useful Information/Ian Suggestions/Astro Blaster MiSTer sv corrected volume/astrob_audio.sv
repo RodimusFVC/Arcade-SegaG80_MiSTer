@@ -1302,58 +1302,18 @@ module astrob_audio (
 
     // All sixteen latch functions are now implemented — no stubs remain.
 
-    //------------------------------------------------------------------------
-    // SOURCE-AMPLITUDE COMPENSATION — the step the MIXW_* CAVEAT above asks
-    // for. MIXW_* are resistor gains only; they assume every voice arrives at
-    // the summing node at the same Vpp. The board does not work that way:
-    // INVADER_3/4 are 555 pin-3 outputs at a full +12 rail (nl_astrob.cpp
-    // 1191/1131), while EXPLOSIONS/ASTEROIDS/LASER/BONUS/REFILL arrive
-    // through coupling caps (C61.2/C60.2/C52.2/C51.2/C50.2/C49.2) and SONAR
-    // straight off an op-amp (U7.1) — all at a fraction of a rail. The
-    // board's 46.6 dB resistor spread therefore gets double-counted against
-    // voices normalised to a common VOICE_FS, and it is not recoverable by
-    // master gain because the loudest voice pins the clamp. R144, the 22k
-    // makeup amp those weights were normalised to, is explicitly NOT
-    // emulated (nl_astrob.cpp:321), so nothing downstream restores the rest.
-    //
-    // Until each stage's real Vpp is derived, MIXE_* stands in for it as a
-    // 3:1 compression of the board's dB spread: MIXE = 16384*(MIXW/16384)^(1/3).
-    // Rank order and every relative ordering are preserved; spread drops
-    // 46.6 -> 15.5 dB. Levels at audio_out with OUTPUT_GAIN_LOG2 = 1:
-    //
-    //   voice                    MIXW   MIXE   dBFS(was)  dBFS(now)
-    //   EXPLOSIONS              16384  16384      +3.3       -2.7
-    //   ASTEROIDS                7700  12738      -3.2       -4.9
-    //   SONAR                     350   4546     -30.1      -13.8
-    //   BONUS / REFILL / LASER-1  164   3530     -36.7      -16.0
-    //   LASER-2 / INVADER-1..4     77   2743     -43.3      -18.2
-    //
-    // Revert = swap MIXE_ back to MIXW_ below and set OUTPUT_GAIN_LOG2 = 2.
-    //------------------------------------------------------------------------
-    localparam signed [15:0] MIXE_EXPL   = 16'sd16384;
-    localparam signed [15:0] MIXE_ASTRO  = 16'sd12738;
-    localparam signed [15:0] MIXE_SONAR  = 16'sd4546;
-    localparam signed [15:0] MIXE_BONUS  = 16'sd3530;
-    localparam signed [15:0] MIXE_REFILL = 16'sd3530;
-    localparam signed [15:0] MIXE_LASER1 = 16'sd3530;
-    localparam signed [15:0] MIXE_LASER2 = 16'sd2743;
-    localparam signed [15:0] MIXE_INV1   = 16'sd2743;
-    localparam signed [15:0] MIXE_INV2   = 16'sd2743;
-    localparam signed [15:0] MIXE_INV3   = 16'sd2743;
-    localparam signed [15:0] MIXE_INV4   = 16'sd2743;
-
     wire signed [31:0] mix_acc =
-          expl_out   * MIXE_EXPL
-        + astro_out  * MIXE_ASTRO
-        + sonar_out  * MIXE_SONAR
-        + bonus_out  * MIXE_BONUS
-        + refill_out * MIXE_REFILL
-        + laser1_out * MIXE_LASER1
-        + laser2_out * MIXE_LASER2
-        + inv1_out   * MIXE_INV1
-        + inv2_out   * MIXE_INV2
-        + inv3_out   * MIXE_INV3
-        + inv4_out   * MIXE_INV4;
+          expl_out   * MIXW_EXPL
+        + astro_out  * MIXW_ASTRO
+        + sonar_out  * MIXW_SONAR
+        + bonus_out  * MIXW_BONUS
+        + refill_out * MIXW_REFILL
+        + laser1_out * MIXW_LASER1
+        + laser2_out * MIXW_LASER2
+        + inv1_out   * MIXW_INV1
+        + inv2_out   * MIXW_INV2
+        + inv3_out   * MIXW_INV3
+        + inv4_out   * MIXW_INV4;
 
     // MIX_Q14 = 14 puts a full-scale EXPLOSION at exactly +/-VOICE_FS.
     // MIX_MAKEUP_LOG2 = 1 (x2, permanent, 2026-08-12): with the loud voices
@@ -1377,12 +1337,10 @@ module astrob_audio (
     //       already diode-clamped noise thumps; the extra crunch reads as
     //       cabinet loudness)
     //   3 = "operator cranked it": everything +18 dB, explosions flat-top
-    localparam OUTPUT_GAIN_LOG2 = 1;
+    localparam OUTPUT_GAIN_LOG2 = 2;
 
-    // Single shift: >>>N then <<<M quantised the output to 2^M and cost the
-    // quiet voices two bits of resolution.
-    wire signed [31:0] mix_scaled =
-        mix_acc >>> (MIX_Q14 - MIX_MAKEUP_LOG2 - OUTPUT_GAIN_LOG2);
+    wire signed [31:0] mix_scaled = (mix_acc >>> (MIX_Q14 - MIX_MAKEUP_LOG2))
+                                    <<< OUTPUT_GAIN_LOG2;
 
     wire signed [15:0] voice_sum_clamped =
         (mix_scaled >  32'sd32767) ?  16'sd32767 :

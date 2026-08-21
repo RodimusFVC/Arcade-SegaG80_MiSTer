@@ -32,21 +32,7 @@
 //
 //  clk_sys = 15.468480 MHz (SegaG80 core system clock).
 //
-//  REVISION 2026-08-12e (this file): MM5837 LFSR lockup guard — the
-//  all-zero absorbing state (reachable via zero-init when reset never
-//  pulses) silenced both noise voices into DC envelope pulses. One OR
-//  term makes it self-starting from any state. Found via a harness that
-//  reproduced exactly that un-reset power-up; hardware with a working
-//  reset was never affected.
-//  PRIOR REVISION 2026-08-12d: OUTPUT_GAIN_LOG2 added (default 2,
-//  +12 dB master gain after the authentic mix) — the board-true relative
-//  levels are correct but absolutely quiet; real cabinets made this up in
-//  the power amp. Also: full trigger-polarity audit vs nl_astrob.cpp
-//  input buffers (U26/U29 7407 non-inverting, U30/U31 7406 inverting) —
-//  every mapping and edge sense CONFIRMED matching; the wave-launch
-//  difference vs MAME is MAME's own documented sonar/bonus trigger
-//  failure, not a discrepancy here (see sv_changes.md 2026-08-12d).
-//  PRIOR REVISION 2026-08-12c: SONAR + BONUS — the board is now
+//  REVISION 2026-08-12c (this file): SONAR + BONUS — the board is now
 //  COMPLETE, all sixteen latch functions implemented. SONAR is calibrated
 //  against a MAME gameplay capture (sonar.wav): four near-sine oscillators
 //  469.15/471.63/473.56/480.93 Hz — these encode MAME's FRND random seed,
@@ -732,16 +718,9 @@ module astrob_audio (
     // asteroids (netlist: C72 couples U8.3 onto Q6.G *and* Q5.G), so the two
     // noise voices are correlated when simultaneous — deliberate, board-true.
     reg [16:0] lfsr;
-    // Lockup guard (2026-08-12e): a XOR LFSR has an absorbing all-zero
-    // state. If reset never pulses (unclocked power-up, cold FPGA config
-    // with an idle reset line), registers init to zero and BOTH noise
-    // voices die permanently -- the symptom is the envelope appearing as
-    // a DC pulse ("speaker pinned to the rail"). The OR term shifts a 1
-    // in whenever the state is zero: self-starting from any state.
-    wire lfsr_zero = (lfsr == 17'd0);
     always @(posedge clk_sys or posedge reset) begin
         if (reset) lfsr <= 17'h1;
-        else if (tick) lfsr <= {lfsr[15:0], (lfsr[16] ^ lfsr[13]) | lfsr_zero};
+        else if (tick) lfsr <= {lfsr[15:0], lfsr[16] ^ lfsr[13]};
     end
     wire noise_bit = lfsr[16];
 
@@ -1302,58 +1281,18 @@ module astrob_audio (
 
     // All sixteen latch functions are now implemented — no stubs remain.
 
-    //------------------------------------------------------------------------
-    // SOURCE-AMPLITUDE COMPENSATION — the step the MIXW_* CAVEAT above asks
-    // for. MIXW_* are resistor gains only; they assume every voice arrives at
-    // the summing node at the same Vpp. The board does not work that way:
-    // INVADER_3/4 are 555 pin-3 outputs at a full +12 rail (nl_astrob.cpp
-    // 1191/1131), while EXPLOSIONS/ASTEROIDS/LASER/BONUS/REFILL arrive
-    // through coupling caps (C61.2/C60.2/C52.2/C51.2/C50.2/C49.2) and SONAR
-    // straight off an op-amp (U7.1) — all at a fraction of a rail. The
-    // board's 46.6 dB resistor spread therefore gets double-counted against
-    // voices normalised to a common VOICE_FS, and it is not recoverable by
-    // master gain because the loudest voice pins the clamp. R144, the 22k
-    // makeup amp those weights were normalised to, is explicitly NOT
-    // emulated (nl_astrob.cpp:321), so nothing downstream restores the rest.
-    //
-    // Until each stage's real Vpp is derived, MIXE_* stands in for it as a
-    // 3:1 compression of the board's dB spread: MIXE = 16384*(MIXW/16384)^(1/3).
-    // Rank order and every relative ordering are preserved; spread drops
-    // 46.6 -> 15.5 dB. Levels at audio_out with OUTPUT_GAIN_LOG2 = 1:
-    //
-    //   voice                    MIXW   MIXE   dBFS(was)  dBFS(now)
-    //   EXPLOSIONS              16384  16384      +3.3       -2.7
-    //   ASTEROIDS                7700  12738      -3.2       -4.9
-    //   SONAR                     350   4546     -30.1      -13.8
-    //   BONUS / REFILL / LASER-1  164   3530     -36.7      -16.0
-    //   LASER-2 / INVADER-1..4     77   2743     -43.3      -18.2
-    //
-    // Revert = swap MIXE_ back to MIXW_ below and set OUTPUT_GAIN_LOG2 = 2.
-    //------------------------------------------------------------------------
-    localparam signed [15:0] MIXE_EXPL   = 16'sd16384;
-    localparam signed [15:0] MIXE_ASTRO  = 16'sd12738;
-    localparam signed [15:0] MIXE_SONAR  = 16'sd4546;
-    localparam signed [15:0] MIXE_BONUS  = 16'sd3530;
-    localparam signed [15:0] MIXE_REFILL = 16'sd3530;
-    localparam signed [15:0] MIXE_LASER1 = 16'sd3530;
-    localparam signed [15:0] MIXE_LASER2 = 16'sd2743;
-    localparam signed [15:0] MIXE_INV1   = 16'sd2743;
-    localparam signed [15:0] MIXE_INV2   = 16'sd2743;
-    localparam signed [15:0] MIXE_INV3   = 16'sd2743;
-    localparam signed [15:0] MIXE_INV4   = 16'sd2743;
-
     wire signed [31:0] mix_acc =
-          expl_out   * MIXE_EXPL
-        + astro_out  * MIXE_ASTRO
-        + sonar_out  * MIXE_SONAR
-        + bonus_out  * MIXE_BONUS
-        + refill_out * MIXE_REFILL
-        + laser1_out * MIXE_LASER1
-        + laser2_out * MIXE_LASER2
-        + inv1_out   * MIXE_INV1
-        + inv2_out   * MIXE_INV2
-        + inv3_out   * MIXE_INV3
-        + inv4_out   * MIXE_INV4;
+          expl_out   * MIXW_EXPL
+        + astro_out  * MIXW_ASTRO
+        + sonar_out  * MIXW_SONAR
+        + bonus_out  * MIXW_BONUS
+        + refill_out * MIXW_REFILL
+        + laser1_out * MIXW_LASER1
+        + laser2_out * MIXW_LASER2
+        + inv1_out   * MIXW_INV1
+        + inv2_out   * MIXW_INV2
+        + inv3_out   * MIXW_INV3
+        + inv4_out   * MIXW_INV4;
 
     // MIX_Q14 = 14 puts a full-scale EXPLOSION at exactly +/-VOICE_FS.
     // MIX_MAKEUP_LOG2 = 1 (x2, permanent, 2026-08-12): with the loud voices
@@ -1365,24 +1304,7 @@ module astrob_audio (
     localparam MIX_Q14          = 14;
     localparam MIX_MAKEUP_LOG2  = 1;
 
-    // OUTPUT_GAIN_LOG2 (2026-08-12d): master gain AFTER the authentic mix.
-    // The board-true relative levels put the loudest voice (explosion) at
-    // only -8.7 dBFS and the invader march ~35 dB below that -- correct
-    // relative to the board, but on real cabinets the power amp + volume
-    // pot made up the absolute level. Without this, gameplay staples sit
-    // near -43 dBFS and the core sounds silent at normal monitor volume.
-    //   0 = pure headroom-safe (nothing ever clips; very quiet)
-    //   1 = explosions still unclipped (peak 24000)
-    //   2 = DEFAULT: +12 dB; explosion bodies clip ~30% over (they are
-    //       already diode-clamped noise thumps; the extra crunch reads as
-    //       cabinet loudness)
-    //   3 = "operator cranked it": everything +18 dB, explosions flat-top
-    localparam OUTPUT_GAIN_LOG2 = 1;
-
-    // Single shift: >>>N then <<<M quantised the output to 2^M and cost the
-    // quiet voices two bits of resolution.
-    wire signed [31:0] mix_scaled =
-        mix_acc >>> (MIX_Q14 - MIX_MAKEUP_LOG2 - OUTPUT_GAIN_LOG2);
+    wire signed [31:0] mix_scaled = mix_acc >>> (MIX_Q14 - MIX_MAKEUP_LOG2);
 
     wire signed [15:0] voice_sum_clamped =
         (mix_scaled >  32'sd32767) ?  16'sd32767 :
