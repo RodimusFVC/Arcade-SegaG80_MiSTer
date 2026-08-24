@@ -235,20 +235,23 @@ assign VIDEO_ARY = status[12] ? ((!ar) ? 12'd3 : 12'd0) : ((!ar) ? 12'd4 : 12'd0
 `include "build_id.v"
 localparam CONF_STR = {
 	"A.SEGAG80;;",
-	"ODE,Aspect Ratio,Original,Full screen,[ARC1],[ARC2];",
-	"OC,Orientation,Vert,Horz;",
-	"OFH,Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",
+	"P1,Video Options;",
+	"P1ODE,Aspect Ratio,Original,Full screen,[ARC1],[ARC2];",
+	"P1OC,Orientation,Vert,Horz;",
+	"P1OB,HDMI Flip,Off,On;",
+	"P1OM,CRT Flip,Off,On;",
+	"P1OFH,Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",
 	"-;",
 	"H1OR,Autosave Hiscores,Off,On;",
-	"P1,Pause Options;",
-	"P1OP,Pause when OSD is open,On,Off;",
-	"P1OQ,Dim video after 10s,On,Off;",
+	"P2,Pause Options;",
+	"P2OP,Pause when OSD is open,On,Off;",
+	"P2OQ,Dim video after 10s,On,Off;",
 	"-;",
 	"DIP;",
 	"-;",
-	"P2,Screen Centering;",
-	"P2O36,H Center,0,-1,-2,-3,-4,-5,-6,-7,+7,+6,+5,+4,+3,+2,+1;",
-	"P2O7A,V Center,0,-1,-2,-3,-4,-5,-6,-7,-8,-9,-10,-11,-12;",
+	"P3,Screen Centering;",
+	"P3O36,H Center,0,-1,-2,-3,-4,-5,-6,-7,+7,+6,+5,+4,+3,+2,+1;",
+	"P3O7A,V Center,0,-1,-2,-3,-4,-5,-6,-7,-8,-9,-10,-11,-12;",
 	"-;",
 	"R0,Reset;",
 	// Slots 3/4 are unused by every game currently on this core (max real
@@ -514,7 +517,7 @@ wire ce_pix;
 // MiSTer screen_rotate with rotate_ccw=1 gives us that orientation.
 wire rotate_ccw = 1;
 wire no_rotate = status[12] | direct_video;
-wire flip = ~no_rotate;
+wire flip = status[11] | ~no_rotate;
 wire video_rotated;
 screen_rotate screen_rotate(.*);
 
@@ -543,6 +546,7 @@ arcade_video #(256, 24) arcade_video
 SegaG80 g80_inst
 (
 	.reset(reset),
+	.crt_flip(status[22]),
 	.clk_sys(CLK_SYS),
 	.game_id(game_id),
 

@@ -32,12 +32,7 @@
 //
 //  clk_sys = 15.468480 MHz (SegaG80 core system clock).
 //
-//  REVISION 2026-08-12g (this file): HYBRID. Keeps 12f's ATTACK_RATE polarity
-//  fix and single-shift mixer, but RESTORES 12e's MIXE_* source-amplitude
-//  compensation and OUTPUT_GAIN_LOG2 = 1. HW 2026-08-21: the 12f mix was
-//  inaudible (only EXPLOSIONS/ASTEROIDS gained; every other voice lost
-//  16-25 dB); 12e was clear. Level table in the MIXE_* block below.
-//  PRIOR REVISION 2026-08-12f: ATTACK_RATE polarity CORRECTED (bit
+//  REVISION 2026-08-12f (this file): ATTACK_RATE polarity CORRECTED (bit
 //  HIGH = staircase runs; the NAND-astable gate is non-inverted -- credit
 //  to the core-side review, which also contributed the single-shift mixer
 //  adopted here). The core-side MIXE_* cube-root weight compression is
@@ -1332,67 +1327,18 @@ module astrob_audio (
 
     // All sixteen latch functions are now implemented — no stubs remain.
 
-    //------------------------------------------------------------------------
-    // SOURCE-AMPLITUDE COMPENSATION (MIXE_*) — RESTORED 2026-08-12g.
-    //
-    // MIXW_* are resistor gains ONLY. They are valid only if every voice
-    // arrives at the summing node at the same Vpp, and the board does not work
-    // that way: INVADER_3/4 are 555 pin-3 outputs at a full +12 rail
-    // (nl_astrob.cpp 1191/1131), while EXPLOSIONS/ASTEROIDS/LASER/BONUS/REFILL
-    // arrive through coupling caps (C61.2/C60.2/C52.2/C51.2/C50.2/C49.2) and
-    // SONAR straight off an op-amp (U7.1) — all at a fraction of a rail. The
-    // board's 46.6 dB resistor spread therefore gets double-counted against
-    // voices normalised to a common VOICE_FS, and it is NOT recoverable by
-    // master gain because the loudest voice pins the clamp. R144, the 22k
-    // makeup amp those weights were normalised to, is explicitly NOT emulated
-    // (nl_astrob.cpp:321), so nothing downstream restores the rest.
-    //
-    // MIXE stands in for per-stage Vpp as a 3:1 compression of the dB spread:
-    // MIXE = 16384*(MIXW/16384)^(1/3). Rank order is preserved; spread drops
-    // 46.6 -> 15.5 dB. Levels at audio_out with OUTPUT_GAIN_LOG2 = 1:
-    //
-    //   voice                    MIXW   MIXE   dBFS(was)  dBFS(now)
-    //   EXPLOSIONS              16384  16384      +3.3       -2.7
-    //   ASTEROIDS                7700  12738      -3.2       -4.9
-    //   SONAR                     350   4546     -30.1      -13.8
-    //   BONUS / REFILL / LASER-1  164   3530     -36.7      -16.0
-    //   LASER-2 / INVADER-1..4     77   2743     -43.3      -18.2
-    //
-    // ⛔ 2026-08-12f REMOVED this and reverted the mixer to raw MIXW_* with
-    // OUTPUT_GAIN_LOG2 = 2, on the argument that the equal-Vpp caveat was
-    // "bounded, a few dB per voice". HARDWARE SAYS OTHERWISE (user, 2026-08-21:
-    // the 12f build was inaudible, the 12e build "quite clear"). Effective
-    // level is MIX x 2^OUTPUT_GAIN_LOG2, so 12f moved EXPLOSIONS +6 dB and
-    // ASTEROIDS +1.6 dB while dropping SONAR -16.2, BONUS/REFILL/LASER-1 -20.6
-    // and LASER-2/INVADER-1..4 -25.0 dB. That is not a few dB; it silences
-    // every voice except the two loudest.
-    //
-    // Revert = swap MIXE_ back to MIXW_ below and set OUTPUT_GAIN_LOG2 = 2.
-    //------------------------------------------------------------------------
-    localparam signed [15:0] MIXE_EXPL   = 16'sd16384;
-    localparam signed [15:0] MIXE_ASTRO  = 16'sd12738;
-    localparam signed [15:0] MIXE_SONAR  = 16'sd4546;
-    localparam signed [15:0] MIXE_BONUS  = 16'sd3530;
-    localparam signed [15:0] MIXE_REFILL = 16'sd3530;
-    localparam signed [15:0] MIXE_LASER1 = 16'sd3530;
-    localparam signed [15:0] MIXE_LASER2 = 16'sd2743;
-    localparam signed [15:0] MIXE_INV1   = 16'sd2743;
-    localparam signed [15:0] MIXE_INV2   = 16'sd2743;
-    localparam signed [15:0] MIXE_INV3   = 16'sd2743;
-    localparam signed [15:0] MIXE_INV4   = 16'sd2743;
-
     wire signed [31:0] mix_acc =
-          expl_out   * MIXE_EXPL
-        + astro_out  * MIXE_ASTRO
-        + sonar_out  * MIXE_SONAR
-        + bonus_out  * MIXE_BONUS
-        + refill_out * MIXE_REFILL
-        + laser1_out * MIXE_LASER1
-        + laser2_out * MIXE_LASER2
-        + inv1_out   * MIXE_INV1
-        + inv2_out   * MIXE_INV2
-        + inv3_out   * MIXE_INV3
-        + inv4_out   * MIXE_INV4;
+          expl_out   * MIXW_EXPL
+        + astro_out  * MIXW_ASTRO
+        + sonar_out  * MIXW_SONAR
+        + bonus_out  * MIXW_BONUS
+        + refill_out * MIXW_REFILL
+        + laser1_out * MIXW_LASER1
+        + laser2_out * MIXW_LASER2
+        + inv1_out   * MIXW_INV1
+        + inv2_out   * MIXW_INV2
+        + inv3_out   * MIXW_INV3
+        + inv4_out   * MIXW_INV4;
 
     // MIX_Q14 = 14 puts a full-scale EXPLOSION at exactly +/-VOICE_FS.
     // MIX_MAKEUP_LOG2 = 1 (x2, permanent, 2026-08-12): with the loud voices
@@ -1416,18 +1362,16 @@ module astrob_audio (
     //       already diode-clamped noise thumps; the extra crunch reads as
     //       cabinet loudness)
     //   3 = "operator cranked it": everything +18 dB, explosions flat-top
-    localparam OUTPUT_GAIN_LOG2 = 1;   // 12g: MIXE_* restored, see block above
+    localparam OUTPUT_GAIN_LOG2 = 2;
 
     // Single shift (adopted from the core-side review, 2026-08-12f):
     // >>>N then <<<M quantised the output to 2^M steps and cost the quiet
     // voices two bits of resolution. Identical levels, two more LSBs.
     // NOTE for integrators: SegaG80.sv halves the astrob+speech sum
-    // (mix_sum[17:1]), so OUTPUT_GAIN_LOG2 = 1 (+6 dB) arrives at the core
-    // output as +3 dB. 12g pairs gain 1 with the MIXE_* weights; the two are
-    // a matched pair -- raising the gain on top of MIXE_* pushes EXPLOSIONS
-    // and the ASTEROIDS bed into the clamp and flattens the
-    // explosion-over-bed margin. If more absolute level is needed, prefer
-    // core/OSD gain over changing this.
+    // (mix_sum[17:1]), so the +12 dB here arrives at the core output as
+    // +6 dB. If more absolute level is needed, prefer core/OSD gain over
+    // OUTPUT_GAIN_LOG2 = 3: at 3, the ASTEROIDS bed also reaches the
+    // clamp, flattening the explosion-over-bed margin this mix preserves.
     wire signed [31:0] mix_scaled =
         mix_acc >>> (MIX_Q14 - MIX_MAKEUP_LOG2 - OUTPUT_GAIN_LOG2);
 

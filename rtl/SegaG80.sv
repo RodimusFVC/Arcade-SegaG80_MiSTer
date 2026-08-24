@@ -12,6 +12,7 @@
 
 module SegaG80 (
     input                reset,
+    input                crt_flip,     // OSD CRT Flip; XORed into the video path only
     input                clk_sys,      // 15.468480 MHz (MAME VIDEO_CLOCK)
     input          [2:0] game_id,      // 0=ASTROB,1=MONSTERB,2=SPACEOD,3=005,4=SINDBADM,5=PIGNEWT
 
@@ -199,7 +200,7 @@ segag80_video video_inst (
     .cpu_din          (cpu_vram_din),
     .cpu_wr           (cpu_vram_wr),
     .video_control_1  (vc1),
-    .video_flip       (vflip),
+    .video_flip       (vflip ^ crt_flip),
     .ce_pix           (ce_pix_i),
     .h_cnt            (vtg_h),
     .v_cnt            (vtg_v),
