@@ -1,0 +1,54 @@
+<misterromdescription>
+    <about author="alanswx" webpage="https://github.com/alanswx/Arcade-SegaG80V_MiSTer"/>
+    <name>Space Fury (revision C)</name>
+    <setname>spacfury</setname>
+    <rbf>Arcade-SegaG80V</rbf>
+    <mameversion>0283</mameversion>
+    <year>1981</year>
+    <manufacturer>Sega</manufacturer>
+    <category>Shooter</category>
+    <players>2</players>
+    <joystick>2-way horizontal</joystick>
+    <num_buttons>2</num_buttons>
+    <!-- index 0: 48K program ROM at $0000, sin/cos PROM at $C000 -->
+    <rom index="0" zip="spacfury.zip" md5="none">
+        <part name="969c.cpu-u25" crc="411207f2"/>
+        <part name="960c.prom-u1" crc="d071ab7e"/>
+        <part name="961c.prom-u2" crc="aebc7b97"/>
+        <part name="962c.prom-u3" crc="dbbba35e"/>
+        <part name="963c.prom-u4" crc="d9e9eadc"/>
+        <part name="964c.prom-u5" crc="7ed947b6"/>
+        <part name="965c.prom-u6" crc="d2443a22"/>
+        <part name="966c.prom-u7" crc="1985ccfc"/>
+        <part name="967c.prom-u8" crc="330f0751"/>
+        <part name="968c.prom-u9" crc="8366eadb"/>
+        <part repeat="28672">00</part>
+        <!-- $C000: sin/cos PROM, X-Y Timing board U39 -->
+        <part name="s-c.xyt-u39" crc="56484d19"/>
+        <!-- $C400: speech:cpu -->
+        <part name="808c.speech-u7" crc="b779884b"/>
+        <!-- $CC00: speech:data -->
+        <part name="970c.speech-u6" crc="979d8535"/>
+        <part name="971c.speech-u5" crc="022dbd32"/>
+        <part name="972c.speech-u4" crc="fad9346d"/>
+        <part repeat="4096">00</part>
+    </rom>
+
+    <!-- index 1: game identifier, decoded by rtl/sega_game_pkg.sv -->
+    <rom index="1">
+        <part>02</part>
+    </rom>
+
+    <!-- Two physical DIP banks, delivered to ioctl index 254 by MiSTer. -->
+    <switches default="8D,33">
+        <dip bits="0" ids="Cocktail,Upright" name="Cabinet"/>
+        <dip bits="1" ids="On,Off" name="Demo Sounds"/>
+        <dip bits="2,3" ids="2,3,4,5" name="Lives"/>
+        <dip bits="4,5" ids="Easy,Medium,Hard,Hardest" name="Difficulty"/>
+        <dip bits="6,7" ids="10000,20000,30000,40000" name="Bonus Life"/>
+        <dip bits="8,9,10,11" ids="4 Coins/1 Credit,3 Coins/1 Credit,2 Coins/1 Credit,1 Coin/1 Credit,1 Coin/2 Credits,1 Coin/3 Credits,1 Coin/4 Credits,1 Coin/5 Credits,1 Coin/6 Credits,2 Coins/1 Credit 5/3 6/4,2 Coins/1 Credit 4/3,1 Coin/1 Credit 5/6,1 Coin/1 Credit 4/5,1 Coin/1 Credit 2/3,1 Coin/2 Credits 5/11,1 Coin/2 Credits 4/9" name="Coin A"/>
+        <dip bits="12,13,14,15" ids="4 Coins/1 Credit,3 Coins/1 Credit,2 Coins/1 Credit,1 Coin/1 Credit,1 Coin/2 Credits,1 Coin/3 Credits,1 Coin/4 Credits,1 Coin/5 Credits,1 Coin/6 Credits,2 Coins/1 Credit 5/3 6/4,2 Coins/1 Credit 4/3,1 Coin/1 Credit 5/6,1 Coin/1 Credit 4/5,1 Coin/1 Credit 2/3,1 Coin/2 Credits 5/11,1 Coin/2 Credits 4/9" name="Coin B"/>
+    </switches>
+
+    <buttons names="Fire,Thrust,-,-,Start 1,Start 2,Coin,Pause" default="A,B,Start,Select,R,L"/>
+</misterromdescription>

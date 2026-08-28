@@ -57,6 +57,13 @@ module SegaG80_CPU (
     input        [7:0] vidram_din_i,
     output             video_control_1_o,
     output             video_flip_o,
+    output             video_control_3_o,   // background board flip
+
+    // Background board registers (ports $B8-$BD)
+    output       [9:0] bg_scrollx_o,
+    output       [9:0] bg_scrolly_o,
+    output             bg_enable_o,
+    output       [3:0] bg_char_bank_o,
 
     // Audio bus (to astrob_audio in parent)
     output             audio_we_o,
@@ -66,7 +73,24 @@ module SegaG80_CPU (
 
     // Speech board write strobes (to segaspeech in parent)
     output             speech_data_we_o,    // port $38
-    output             speech_ctrl_we_o     // port $3B
+    output             speech_ctrl_we_o,    // port $3B
+
+    // Sega Universal Sound Board (to sega_usb in parent) — Pig Newton only.
+    // $3F is data write / status read; $D000-$DFFF is the shared program RAM,
+    // whose writes go through the security scrambler exactly like VRAM's.
+    output             usb_data_wr_o,
+    output       [7:0] usb_din_o,
+    input        [7:0] usb_status_i,
+    output      [11:0] usb_pgm_addr_o,
+    output       [7:0] usb_pgm_din_o,
+    output             usb_pgm_wr_o,
+    input        [7:0] usb_pgm_dout_i,
+
+    // Space Odyssey background board ports ($08-$0F)
+    output             so_port_wr_o,
+    output       [2:0] so_port_addr_o,
+    output       [7:0] so_port_din_o,
+    input        [7:0] so_port_dout_i
 );
 
 //----------------------------------------------------------------------------
@@ -358,6 +382,10 @@ wire rom_sel   = mem_read  & (cpu_addr < 16'hC000);                // 0x0000–0
 wire ram_sel   = (cpu_addr >= 16'hC800) & (cpu_addr <= 16'hCFFF);   // 0xC800–0xCFFF
 wire vram_sel  = (cpu_addr >= 16'hE000);                            // 0xE000–0xFFFF
 
+// USB shared program RAM — MAME init_pignewt installs this over $D000-$DFFF,
+// a window no other G-80 raster game decodes.
+wire usb_sel   = usb_en & (cpu_addr >= 16'hD000) & (cpu_addr <= 16'hDFFF);
+
 //----------------------------------------------------------------------------
 // Port decode — segag80r.cpp:576-583
 //   0xBE/0xBF : video port r/w
@@ -380,6 +408,21 @@ wire io_3e_3f = (port_addr == 8'h3E) | (port_addr == 8'h3F);
 // Speech board ($38 data, $3B control) — MAME segag80r.cpp:1889-1891.
 wire io_38 = (port_addr == 8'h38);
 wire io_3b = (port_addr == 8'h3B);
+
+// Background board ($B8-$BD) — MAME segag80r.cpp:1997-1999 (init_pignewt).
+// $B4/$B5 (pignewt_back_color_w) has no known rendering effect and is absorbed.
+wire io_b8_bd = (port_addr >= 8'hB8) & (port_addr <= 8'hBD);
+
+// Universal Sound Board — Pig Newton only. $3F is shared with the Astro
+// Blaster audio port, so both sides are gated on game_id.
+wire usb_en = (game_id == 3'd5);
+wire io_3f  = (port_addr == 8'h3F);
+
+// Space Odyssey background board ($08-$0F) — MAME segag80r.cpp:1926-1929.
+// Reads return 0xFE | bg_detect; $0E/$0F are also the sound-board write
+// ports, which back_port_w treats as no-ops.
+wire so_en    = (game_id == 3'd2);
+wire io_08_0f = (port_addr >= 8'h08) & (port_addr <= 8'h0F);
 
 //----------------------------------------------------------------------------
 // Program ROM (48 KB) — loaded from ioctl index 0
@@ -463,6 +506,45 @@ always @(posedge clk_sys or posedge reset) begin
     if (reset)                video_flip_r <= 1'b0;
     else if (vblank_rising)   video_flip_r <= video_control[0];
 end
+
+//----------------------------------------------------------------------------
+// Background board registers — MAME segag80r_v.cpp pignewt_back_port_w.
+//   $B8 scroll X low   $B9 scroll X high (d1..d0) + enable (d7)
+//   $BA scroll Y low   $BB scroll Y high (d1..d0)
+//   $BC character bank — MAME remaps to (d&0x09)|((d>>2)&2)|((d<<2)&4),
+//                        i.e. only d3 and d0 survive, as {d3,d0,d3,d0}
+//   $BD not connected
+//----------------------------------------------------------------------------
+reg [9:0] bg_scrollx, bg_scrolly;
+reg       bg_enable;
+reg [3:0] bg_char_bank;
+
+always @(posedge clk_sys or posedge reset) begin
+    if (reset) begin
+        bg_scrollx   <= 10'd0;
+        bg_scrolly   <= 10'd0;
+        bg_enable    <= 1'b0;
+        bg_char_bank <= 4'd0;
+    end else if (io_write & io_b8_bd & ce_cpu) begin
+        case (port_addr[2:0])
+            3'd0: bg_scrollx[7:0] <= cpu_dout;
+            3'd1: begin
+                bg_scrollx[9:8] <= cpu_dout[1:0];
+                bg_enable       <= cpu_dout[7];
+            end
+            3'd2: bg_scrolly[7:0] <= cpu_dout;
+            3'd3: bg_scrolly[9:8] <= cpu_dout[1:0];
+            3'd4: bg_char_bank    <= {cpu_dout[3], cpu_dout[0], cpu_dout[3], cpu_dout[0]};
+            default: ;
+        endcase
+    end
+end
+
+assign bg_scrollx_o   = bg_scrollx;
+assign bg_scrolly_o   = bg_scrolly;
+assign bg_enable_o    = bg_enable;
+assign bg_char_bank_o = bg_char_bank;
+assign video_control_3_o = video_control[3];
 
 wire [7:0] video_port_r =
     port_addr[0] ? {5'b11111, video_control[2], video_flip_r, vblank_latch}
@@ -594,13 +676,16 @@ wire [7:0] fc_dout = {
 //----------------------------------------------------------------------------
 always @* begin
     casez (1'b1)
-        (rom_sel):              cpu_din = rom_dout;
-        (ram_sel  & mem_read):  cpu_din = mainram_dout;
-        (vram_sel & mem_read):  cpu_din = vidram_dout;
-        (io_read  & io_be_bf):  cpu_din = video_port_r;
-        (io_read  & io_f8_fb):  cpu_din = mangled_dout;
-        (io_read  & io_fc):     cpu_din = fc_dout;
-        default:                cpu_din = 8'hFF;
+        (rom_sel):                    cpu_din = rom_dout;
+        (ram_sel  & mem_read):        cpu_din = mainram_dout;
+        (vram_sel & mem_read):        cpu_din = vidram_dout;
+        (usb_sel  & mem_read):        cpu_din = usb_pgm_dout_i;
+        (io_read  & io_be_bf):        cpu_din = video_port_r;
+        (io_read  & io_f8_fb):        cpu_din = mangled_dout;
+        (io_read  & io_fc):           cpu_din = fc_dout;
+        (io_read  & io_3f & usb_en):  cpu_din = usb_status_i;
+        (io_read  & io_08_0f & so_en):cpu_din = so_port_dout_i;
+        default:                      cpu_din = 8'hFF;
     endcase
 end
 
@@ -617,11 +702,26 @@ assign vram_wr_o         = vram_sel & mem_write & ce_cpu;
 assign video_control_1_o = video_control[1];
 assign video_flip_o      = video_flip_r;
 
-// Astro Blaster audio bus
-assign audio_we_o   = io_write & io_3e_3f;
+// Astro Blaster audio bus — $3F doubles as the USB data port on Pig Newton.
+assign audio_we_o   = io_write & io_3e_3f & ~usb_en;
 assign audio_addr_o = port_addr[0];
 assign audio_din_o  = cpu_dout;
 assign ce_cpu_o     = ce_cpu;
+
+// Universal Sound Board bus (MAME segag80r.cpp:2003-2006, init_pignewt).
+// usb_ram_w applies decrypt_offset, so the shared-RAM window reuses the same
+// scrambled address the VRAM write path uses.
+assign usb_data_wr_o  = io_write & io_3f & usb_en & ce_cpu;
+assign usb_din_o      = cpu_dout;
+assign usb_pgm_addr_o = (usb_sel & mem_write) ? decrypt_addr[11:0]
+                                              : cpu_addr[11:0];
+assign usb_pgm_din_o  = cpu_dout;
+assign usb_pgm_wr_o   = usb_sel & mem_write & ce_cpu;
+
+// Space Odyssey background board bus (MAME segag80r.cpp:1926-1929).
+assign so_port_wr_o   = io_write & io_08_0f & so_en & ce_cpu;
+assign so_port_addr_o = port_addr[2:0];
+assign so_port_din_o  = cpu_dout;
 
 // Speech board strobes (MAME segag80r.cpp:1890-1891)
 assign speech_data_we_o = io_write & io_38 & ce_cpu;

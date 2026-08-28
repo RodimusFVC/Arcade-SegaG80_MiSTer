@@ -1,0 +1,74 @@
+# Sega G-80 X-Y core file list.
+#
+# WARNING: do not add files through the Quartus IDE — it rewrites the .qsf.
+# Add them here instead.
+
+# --- vendored CPU cores -----------------------------------------------------
+set_global_assignment -name VERILOG_FILE rtl/tv80/tv80_alu.v
+set_global_assignment -name VERILOG_FILE rtl/tv80/tv80_mcode.v
+set_global_assignment -name VERILOG_FILE rtl/tv80/tv80_reg.v
+set_global_assignment -name VERILOG_FILE rtl/tv80/tv80_core.v
+set_global_assignment -name VERILOG_FILE rtl/tv80/tv80e.v
+
+# --- AY-3-8912 (Zektor) ---
+set_global_assignment -name QIP_FILE rtl/jt49/jt49.qip
+
+# --- Sega G-80 machine ------------------------------------------------------
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sega_game_pkg.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sega_security.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sega_ports.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/segag80v_cpu.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/xy/sega_xy.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/xy/sega_xy_top.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/sega_ay.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/sp0250.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/sega_speech.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/speech_filter.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/discrete_blocks.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/sega_discrete.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/usb_timer.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/usb_noise.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/usb_filter.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/sega_usb.sv
+set_global_assignment -name VERILOG_FILE rtl/i8035/i8035.v
+set_global_assignment -name VERILOG_FILE rtl/spram.v
+set_global_assignment -name QIP_FILE rtl/tv48/t48.qip
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/segag80v.sv
+
+# --- video ------------------------------------------------------------------
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sega_clocks.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sega_inputs.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sega_geometry.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sega_video.sv
+set_global_assignment -name VERILOG_FILE rtl/pause.v
+
+# --- videodr0me_fb vector renderer (vendored, see Research/) -----------------
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/videodr0me_fb/vfb_layout_pkg.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/videodr0me_fb/vfb_dac_ladder.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/videodr0me_fb/vfb_rasterizer.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/videodr0me_fb/vfb_phosphor_timing.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/videodr0me_fb/vfb_phosphor_compositor.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/videodr0me_fb/vfb_ddr_arbiter.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/videodr0me_fb/vfb_buffer_controller.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/videodr0me_fb/vfb_tile_cache_manager.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/videodr0me_fb/vfb_readout.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/videodr0me_fb/vfb_blur.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/videodr0me_fb/vfb_filter.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/videodr0me_fb/vfb_rle_encoder.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/videodr0me_fb/vfb_rle_decoder.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/videodr0me_fb/vfb_sync_fifo.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/videodr0me_fb/vfb_sdram_core.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/videodr0me_fb/vfb_sdram_delay.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/videodr0me_fb/vfb_halo_wide.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/videodr0me_fb/vfb_profile_resolver.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/videodr0me_fb/vfb_final_present.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/videodr0me_fb/vfb_halo_pipeline.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/videodr0me_fb/vfb_tone_mapper.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/videodr0me_fb/vfb_top.sv
+
+# --- PLL --------------------------------------------------------------------
+set_global_assignment -name QIP_FILE rtl/pll.qip
+
+# --- top level --------------------------------------------------------------
+set_global_assignment -name SDC_FILE Arcade-SegaG80V.sdc
+set_global_assignment -name SYSTEMVERILOG_FILE Arcade-SegaG80V.sv

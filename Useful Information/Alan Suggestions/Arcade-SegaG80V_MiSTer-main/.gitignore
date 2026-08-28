@@ -1,0 +1,9 @@
+# Verilator build output
+sim/obj_*/
+
+# ROM-derived data — never commit
+sim/roms/
+sim/vramdumps/
+
+# Audio capture output — ROM-derived, and large
+sim/audio/

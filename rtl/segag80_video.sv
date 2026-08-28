@@ -16,6 +16,19 @@ module segag80_video (
     input              video_control_1, // m_video_control[1]: palette enable
     input              video_flip,      // m_video_flip
 
+    // Background board (G80_BACKGROUND_PIGNEWT/SINDBADM) — from segag80_bg
+    input              bg_board,        // this game has a background board
+    input              bg_enable,       // port $B9 d7
+    input        [3:0] bg_color,
+    input        [1:0] bg_pix,
+
+    // Space Odyssey background board — from segag80_spaceod_bg
+    input              so_board,
+    input              so_show,
+    input        [5:0] so_color6,
+    input        [5:0] so_raw6,
+    output             so_detect_set,
+
     // Scanout side — from T1.4 vtg
     input              ce_pix,
     input        [8:0] h_cnt,           // 0..327
@@ -33,9 +46,13 @@ module segag80_video (
     //------------------------------------------------------------------------
     // Palette-write decode
     //   MAME: offset&0x1000 && video_control&0x02 → paletteram
+    //   pignewt_videoram_w takes offsets 0x1040-0x107F first and routes them
+    //   to the background bank (paloffs | 0x40); without that intercept they
+    //   fall through with offset &= 0x3f and clobber foreground entries.
     //------------------------------------------------------------------------
-    wire pal_write  = cpu_wr & cpu_addr[12] & video_control_1;
-    wire vram_write = cpu_wr & ~pal_write;
+    wire pal_write    = cpu_wr & cpu_addr[12] & video_control_1;
+    wire bg_pal_write = pal_write & bg_board & (cpu_addr[12:6] == 7'b1000001);
+    wire vram_write   = cpu_wr & ~pal_write;
 
     //------------------------------------------------------------------------
     // 8 KB VRAM — dual-port
@@ -55,12 +72,12 @@ module segag80_video (
     assign cpu_dout = vram_cpu_rd;
 
     //------------------------------------------------------------------------
-    // 64-entry palette RAM
-    //   MAME: paletteram offset = cpu_addr & 0x3F
+    // 128-entry palette RAM — 0x00-0x3F foreground, 0x40-0x7F background
+    //   MAME: paletteram offset = cpu_addr & 0x3F, background bank | 0x40
     //   Byte format: bits[2:0]=R, bits[5:3]=G, bits[7:6]=B
     //------------------------------------------------------------------------
-    reg [7:0] pal [0:63];
-    wire [5:0] pal_wr_addr = cpu_addr[5:0];
+    reg [7:0] pal [0:127];
+    wire [6:0] pal_wr_addr = {bg_pal_write, cpu_addr[5:0]};
 
     always @(posedge clk) begin
         if (pal_write)
@@ -94,6 +111,19 @@ module segag80_video (
             2'd1: dac2 = 8'd85;
             2'd2: dac2 = 8'd170;
             2'd3: dac2 = 8'd255;
+        endcase
+    endfunction
+
+    // Space Odyssey's background board has its own ladder — 1800/1200 with a
+    // 220 pulldown (spaceod_bg_init_palette), giving 2/5 and 3/5 of full
+    // scale rather than the foreground's even thirds.
+    function [7:0] dac2_so;
+        input [1:0] v;
+        case (v)
+            2'd0: dac2_so = 8'd0;
+            2'd1: dac2_so = 8'd102;
+            2'd2: dac2_so = 8'd153;
+            2'd3: dac2_so = 8'd255;
         endcase
     endfunction
 
@@ -220,13 +250,35 @@ module segag80_video (
     wire       plane0_bit = plane0_cur[bit_sel];
     wire       plane1_bit = plane1_cur[bit_sel];
     wire [1:0] pixel_2bit = {plane1_bit, plane0_bit};
-    wire [5:0] pal_index  = {tile_code_cur[7:4], pixel_2bit};
+
+    // MAME screen_update_segag80r: a background board makes foreground pen 0
+    // transparent (transparent_pens = 1); with no background board the
+    // foreground is fully opaque. A disabled background shows palette entry 0,
+    // matching draw_background_full_scroll's bitmap.fill(0).
+    wire       fg_clear   = bg_board & (pixel_2bit == 2'b00);
+    wire [6:0] bg_index   = bg_enable ? {1'b1, bg_color, bg_pix} : 7'd0;
+    wire [6:0] pal_index  = fg_clear ? bg_index
+                                     : {1'b0, tile_code_cur[7:4], pixel_2bit};
     wire [7:0] pal_entry  = pal[pal_index];
 
     wire active = (h_cnt < 9'd256) && (v_cnt < 9'd224);
 
-    assign r_out = active ? dac3(pal_entry[2:0]) : 8'd0;
-    assign g_out = active ? dac3(pal_entry[5:3]) : 8'd0;
-    assign b_out = active ? dac2(pal_entry[7:6]) : 8'd0;
+    // Space Odyssey draws the foreground OPAQUE and then lets the background
+    // through wherever the foreground's COLOUR is black — MAME tests the
+    // palette RAM contents (m_paletteram[dst[x]]), not the pen index.
+    wire fg_black   = (pal_entry == 8'd0);
+    wire so_visible = so_board & fg_black & so_show;
+
+    // Collision flag: raw background pixel non-zero, foreground colour
+    // non-zero, and the foreground tile colour == spaceod_bg_detect_tile_color.
+    assign so_detect_set = active & so_board & (so_raw6 != 6'd0) & ~fg_black
+                         & (tile_code_cur[7:4] == 4'd1);
+
+    assign r_out = !active    ? 8'd0 :
+                   so_visible ? dac2_so(so_color6[5:4]) : dac3(pal_entry[2:0]);
+    assign g_out = !active    ? 8'd0 :
+                   so_visible ? dac2_so(so_color6[3:2]) : dac3(pal_entry[5:3]);
+    assign b_out = !active    ? 8'd0 :
+                   so_visible ? dac2_so(so_color6[1:0]) : dac2(pal_entry[7:6]);
 
 endmodule

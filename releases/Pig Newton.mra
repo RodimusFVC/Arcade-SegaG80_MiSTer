@@ -17,9 +17,11 @@
     <rbf>SegaG80</rbf>
     <about></about>
 
+    <buttons names="Action,Not Used,Not Used,Not Used,Coin,Start 1P,Start 2P,Pause" default="A,B,X,Y,Select,Start,R,L"/>
+
     <!-- Index 1: Game ID byte — MUST appear before index 0 in MRA.
          0x05 = Pig Newton. Was 0x02 (shared with Space Odyssey) until
-         2026-07-26 -- they use the same 315-0063 security chip (still
+         2026-07-26 — they use the same 315-0063 security chip (still
          handled together in SegaG80_CPU.sv's chip_sel mux) but need
          different control-port layouts, which game_id also gates. Split
          to its own id so control decode can tell them apart. -->
@@ -57,17 +59,14 @@
              ++++------- Unused = 1
         33 = 0011 0011  → 1C/1C both coins
 
-      NOTE (1): GAME_ID blocker — current RBF has GAME_ID=0 (315-0062/ASTROB) hardwired.
-      Pig Newton requires 315-0063 security chip (target GAME_ID=2, same as Space Odyssey).
-      NOTE: Hardware description in MAME comments says 315-0062, but init_pignewt()
-      calls segag80_security(63), suggesting 315-0063. Trust the code.
-      Core change needed before this game can decrypt correctly.
+      NOTE (1): GAME_ID is 0x05, which selects the 315-0063 security chip in
+      SegaG80_CPU.sv's chip_sel mux. MAME's hardware comment says 315-0062 but
+      init_pignewt() calls segag80_security(63); the code is authoritative.
 
       NOTE (2): cpu.u25 is marked BAD_DUMP in MAME. May cause unexpected behaviour.
 
-      NOTE (3): Background board ROMs (gfx1 2×8KB, gfx2 3×4KB) not loaded.
-      Pig Newton uses G80_BACKGROUND_PIGNEWT (same board as Monster Bash variant).
-      RTL has no background board support yet.
+      NOTE (3): Background board is G80_BACKGROUND_PIGNEWT ("full scroll"),
+      implemented in rtl/segag80_bg.sv. ROMs load at indices 7 and 8 below.
 
       NOTE (4): Pig Newton uses the Sega Universal Sound Board (8035-based).
       This is a different sound architecture than Astro Blaster. No audio expected.
@@ -112,18 +111,25 @@
         <part repeat="0x0800">FF</part>
     </rom>
 
-    <!-- Index 1: Background board ROMs — NOT CONSUMED.
-         gfx1: 1904c.bg + 1905c.bg (2 × 8 KB)
-         gfx2: 1906c.bg + 1907c.bg + 1908c.bg (3 × 4 KB)
-         RTL has no background board support yet.
-    <rom index="1" md5="none" zip="pignewt.zip">
+    <!-- Index 7: Background board tile ROMs (MAME "gfx1", 2 × 8 KB).
+         Plane 0 (LSB) then plane 1 (MSB); segag80_bg.sv addresses them as
+         rom_p0[{bank[1:0],code,row}] / rom_p1[{bank[3:2],code,row}], which is
+         monsterb_expand_gfx's banking expressed as address arithmetic. -->
+    <rom index="7" md5="none" zip="pignewt.zip">
         <part crc="e9de2c8b" name="1904c.bg"/>
         <part crc="af7cfe0b" name="1905c.bg"/>
+    </rom>
+
+    <!-- Index 8: Background board tilemap ROM (MAME "gfx2").
+         ROM_REGION is 0x4000 with only 0x3000 populated, and the tilemap
+         height is region_bytes/128 = 128 rows, so the trailing 4 KB must be
+         present as zeroes to keep the map 128 × 128 tiles. -->
+    <rom index="8" md5="none" zip="pignewt.zip">
         <part crc="c79d33ce" name="1906c.bg"/>
         <part crc="bc839d3c" name="1907c.bg"/>
         <part crc="92cb14da" name="1908c.bg"/>
+        <part repeat="0x1000">00</part>
     </rom>
-    -->
 
     <!-- Index 2: Reserved for hiscore. -->
     <rom index="2" md5="none"></rom>

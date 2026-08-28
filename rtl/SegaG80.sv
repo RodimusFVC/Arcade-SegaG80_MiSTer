@@ -93,6 +93,39 @@ wire  [7:0] vidram_to_cpu;
 wire        vc1;
 wire        vflip;
 
+// Background board (Pig Newton / Sindbad Mystery)
+wire        vc3;
+wire  [9:0] bg_scrollx, bg_scrolly;
+wire        bg_enable;
+wire  [3:0] bg_char_bank;
+wire  [3:0] bg_color;
+wire  [1:0] bg_pix;
+
+// game_id 5 = PIGNEWT — the only background board wired up so far.
+wire        bg_board = (game_id == 3'd5);
+
+// Space Odyssey background board — game_id 2.
+wire        so_board = (game_id == 3'd2);
+wire        so_port_wr;
+wire  [2:0] so_port_addr;
+wire  [7:0] so_port_din;
+wire  [7:0] so_port_dout;
+wire        so_detect_set;
+wire        so_show;
+wire  [5:0] so_color6;
+wire  [5:0] so_raw6;
+
+// Sega Universal Sound Board — Pig Newton only.
+wire        usb_en = (game_id == 3'd5);
+wire        usb_data_wr;
+wire  [7:0] usb_din;
+wire  [7:0] usb_status;
+wire [11:0] usb_pgm_addr;
+wire  [7:0] usb_pgm_din;
+wire        usb_pgm_wr;
+wire  [7:0] usb_pgm_dout;
+wire signed [15:0] usb_sample;
+
 // Videoram/palette output from T1.5
 wire  [7:0] pix_r8, pix_g8, pix_b8;
 
@@ -164,12 +197,77 @@ SegaG80_CPU cpu_board (
     .vidram_din_i        (vidram_to_cpu),
     .video_control_1_o   (vc1),
     .video_flip_o        (vflip),
+    .video_control_3_o   (vc3),
+    .bg_scrollx_o        (bg_scrollx),
+    .bg_scrolly_o        (bg_scrolly),
+    .bg_enable_o         (bg_enable),
+    .bg_char_bank_o      (bg_char_bank),
     .audio_we_o          (audio_we),
     .audio_addr_o        (audio_addr_w),
     .audio_din_o         (audio_din_w),
     .ce_cpu_o            (ce_cpu_s),
     .speech_data_we_o    (speech_data_we),
-    .speech_ctrl_we_o    (speech_ctrl_we)
+    .speech_ctrl_we_o    (speech_ctrl_we),
+    .usb_data_wr_o       (usb_data_wr),
+    .usb_din_o           (usb_din),
+    .usb_status_i        (usb_status),
+    .usb_pgm_addr_o      (usb_pgm_addr),
+    .usb_pgm_din_o       (usb_pgm_din),
+    .usb_pgm_wr_o        (usb_pgm_wr),
+    .usb_pgm_dout_i      (usb_pgm_dout),
+    .so_port_wr_o        (so_port_wr),
+    .so_port_addr_o      (so_port_addr),
+    .so_port_din_o       (so_port_din),
+    .so_port_dout_i      (so_port_dout)
+);
+
+//----------------------------------------------------------------------------
+// Space Odyssey background board — gfx1 at ioctl index 7, gfx2 at index 8.
+//----------------------------------------------------------------------------
+segag80_spaceod_bg spaceod_bg_inst (
+    .clk          (clk_sys),
+    .reset        (reset),
+    .ce_pix       (ce_pix_i),
+    .h_cnt        (vtg_h),
+    .v_cnt        (vtg_v),
+    .port_wr      (so_port_wr),
+    .port_addr    (so_port_addr),
+    .port_din     (so_port_din),
+    .port_dout    (so_port_dout),
+    .detect_set   (so_detect_set),
+    .ioctl_addr   (ioctl_addr),
+    .ioctl_data   (ioctl_data),
+    .ioctl_wr     (ioctl_wr),
+    .sel_tiles    (ioctl_index == 8'd7),
+    .sel_map      (ioctl_index == 8'd8),
+    .bg_color6    (so_color6),
+    .bg_raw6      (so_raw6),
+    .bg_show      (so_show)
+);
+
+//----------------------------------------------------------------------------
+// Sega Universal Sound Board (drawing 800-0377) — Pig Newton.
+// From the Arcade-SegaG80V core; the board carries no ROM of its own, the
+// main Z80 uploads the 8035 program through the $D000-$DFFF window.
+// Held in reset on every other game: in_latch resets to 0, which would
+// otherwise release the 8035 to run against empty program RAM.
+//----------------------------------------------------------------------------
+sega_usb #(.CLK_HZ(15_468_480)) usb_inst (
+    .clk        (clk_sys),
+    .reset      (reset | ~usb_en),
+    .data_wr    (usb_data_wr),
+    .din        (usb_din),
+    .status     (usb_status),
+    .pgm_addr   (usb_pgm_addr),
+    .pgm_din    (usb_pgm_din),
+    .pgm_wr     (usb_pgm_wr),
+    .pgm_dout   (usb_pgm_dout),
+    .audio      (usb_sample),
+    .dbg_tick   (),
+    .dbg_noise  (),
+    .dbg_tmr    (),
+    .dbg_cfg    (),
+    .dbg_env    ()
 );
 
 //----------------------------------------------------------------------------
@@ -193,6 +291,25 @@ segag80_vtg vtg (
 //----------------------------------------------------------------------------
 // Videoram + tilemap + palette
 //----------------------------------------------------------------------------
+// Background board — gfx1 tiles at ioctl index 7, gfx2 tilemap at index 8.
+segag80_bg bg_inst (
+    .clk              (clk_sys),
+    .ce_pix           (ce_pix_i),
+    .h_cnt            (vtg_h),
+    .v_cnt            (vtg_v),
+    .bg_scrollx       (bg_scrollx),
+    .bg_scrolly       (bg_scrolly),
+    .bg_char_bank     (bg_char_bank),
+    .bg_flip          (vc3 ^ crt_flip),
+    .ioctl_addr       (ioctl_addr),
+    .ioctl_data       (ioctl_data),
+    .ioctl_wr         (ioctl_wr),
+    .sel_tiles        (ioctl_index == 8'd7),
+    .sel_map          (ioctl_index == 8'd8),
+    .bg_color         (bg_color),
+    .bg_pix           (bg_pix)
+);
+
 segag80_video video_inst (
     .clk              (clk_sys),
     .reset            (reset),
@@ -201,6 +318,15 @@ segag80_video video_inst (
     .cpu_wr           (cpu_vram_wr),
     .video_control_1  (vc1),
     .video_flip       (vflip ^ crt_flip),
+    .bg_board         (bg_board),
+    .bg_enable        (bg_enable),
+    .bg_color         (bg_color),
+    .bg_pix           (bg_pix),
+    .so_board         (so_board),
+    .so_show          (so_show),
+    .so_color6        (so_color6),
+    .so_raw6          (so_raw6),
+    .so_detect_set    (so_detect_set),
     .ce_pix           (ce_pix_i),
     .h_cnt            (vtg_h),
     .v_cnt            (vtg_v),
@@ -312,10 +438,24 @@ assign video_b      = pix_b8;
 wire signed [17:0] mix_sum = $signed({{2{astrob_sample[15]}}, astrob_sample})
                            + $signed({{2{speech_sample[15]}},  speech_sample});
 wire signed [16:0] mixed   = mix_sum[17:1];   // master 0.5 on the SUM, per MAME
+
+// The USB board is exclusive to Pig Newton, where astrob_audio and speech are
+// both silent, so it is summed instead of sharing the 0.5 master.
+// Explicitly muted off-game so nothing can leak into Astro Blaster's mix.
+//
+// Output level: the SegaG80V core sums this board at unity, but on Pig Newton
+// it lands far below a usable level. Adjust this one constant by ear — 2 = 4x,
+// 3 = 8x, 0 = the vector core's unity. The clamp below catches overshoot.
+localparam USB_GAIN_LOG2 = 2;
+
+wire signed [15:0] usb_mix    = usb_en ? usb_sample : 16'sd0;
+wire signed [19:0] usb_scaled = $signed({{4{usb_mix[15]}}, usb_mix}) <<< USB_GAIN_LOG2;
+wire signed [19:0] mix_all    = $signed({{3{mixed[16]}}, mixed}) + usb_scaled;
+
 assign audio_out = pause ? 16'sd0 :
-    (mixed >  17'sd32767) ?  16'sd32767 :
-    (mixed < -17'sd32768) ? -16'sd32768 :
-                             mixed[15:0];
+    (mix_all >  20'sd32767) ?  16'sd32767 :
+    (mix_all < -20'sd32768) ? -16'sd32768 :
+                               mix_all[15:0];
 
 // CPU data-in tied off until T1.2 wires the bus (this will be removed by T1.2).
 assign cpu_din = 8'hFF;

@@ -17,6 +17,8 @@
     <rbf>SegaG80</rbf>
     <about></about>
 
+    <buttons names="Fire,Bomb,Not Used,Not Used,Coin,Start 1P,Start 2P,Pause" default="A,B,X,Y,Select,Start,R,L"/>
+
     <!-- Index 1: Game ID byte — MUST appear before index 0 in MRA.
          0x02 = Space Odyssey (315-0063 security chip). -->
     <rom index="1"><part>02</part></rom>
@@ -103,24 +105,29 @@
         <part repeat="0x2800">FF</part>
     </rom>
 
-    <!-- Index 1: Background board ROMs — NOT CONSUMED.
-         Space Odyssey background generator board has two banks:
-           gfx1: epr-13..18 (6 × 4 KB = 24 KB) — tile patterns
-           gfx2: epr-09..12 (4 × 4 KB = 16 KB) — sprite/object patterns
-         RTL has no background board implementation yet.
-    <rom index="1" md5="none" zip="spaceod.zip">
+    <!-- Index 7: Background board tile ROMs (MAME "gfx1", 6 × 4 KB = 24 KB).
+         SIX BITPLANES, one ROM per plane, 512 tiles. gfx_8x8x6_planar lists
+         planeoffset MSB-first, so stream order here is plane bit 0 (epr-18)
+         through plane bit 5 (epr-13) — segag80_spaceod_bg.sv selects the
+         plane with ioctl_addr[14:12] and assembles bit5..bit0 in that order. -->
+    <rom index="7" md5="none" zip="spaceod.zip">
         <part crc="24a81c04" name="epr-18.bg-u10"/>
         <part crc="6c7490c0" name="epr-17.bg-u9"/>
         <part crc="acdf203e" name="epr-16.bg-u8"/>
         <part crc="ae0e5d71" name="epr-15.bg-u7"/>
         <part crc="d2ebd915" name="epr-14.bg-u6"/>
         <part crc="74bd7f9a" name="epr-13.bg-u5"/>
+    </rom>
+
+    <!-- Index 8: Background board TILEMAP ROM (MAME "gfx2", 4 × 4 KB = 16 KB).
+         One byte per tile, addressed as four 32x32 sections by
+         spaceod_scan_rows; bg_control[7:6] selects which 4 KB bank is live. -->
+    <rom index="8" md5="none" zip="spaceod.zip">
         <part crc="a87bfc0a" name="epr-09.bg-u1"/>
         <part crc="8ce88100" name="epr-10.bg-u2"/>
         <part crc="1bdbdab5" name="epr-11.bg-u3"/>
         <part crc="629a4a1f" name="epr-12.bg-u4"/>
     </rom>
-    -->
 
     <!-- Index 2: Reserved for hiscore. -->
     <rom index="2" md5="none"></rom>

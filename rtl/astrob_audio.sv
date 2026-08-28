@@ -32,7 +32,64 @@
 //
 //  clk_sys = 15.468480 MHz (SegaG80 core system clock).
 //
-//  REVISION 2026-08-12g (this file): HYBRID. Keeps 12f's ATTACK_RATE polarity
+//  REVISION 2026-08-27e (this file): MIXE_INV1 2743 -> 1829 (-3.5 dB).
+//  Cancels the LEVEL of 27b's amplitude correction while keeping its
+//  waveform. 27b was applied while INV1 was still stuck on the warp leg at
+//  90.3 Hz and pinned at vstep 0; once 27c and 27d fixed those, the +3.5 dB
+//  was surplus. INV1 still nets +2.1 dB vs this morning from the pitch fixes.
+//  INV1_POS/INV1_NEG are unchanged and stay the board's true full rail.
+//  PRIOR REVISION 2026-08-27d: ATTACK_RATE STAIRCASE REWORKED — the
+//  march now accelerates. The CD4017 is clocked by the GAME'S pulses (falling
+//  edge of $3F bit 4), not by a free-running internal oscillator. The game
+//  drives it as a counted step clock: $CAB9 seeded to 2, capped at 10, one
+//  pulse per step ($30A6-$30B3) = eight pulses per wave, so vstep climbs
+//  0 -> 8 and holds. The old model gated a 14.3 Hz astable with bit 4 AND
+//  reloaded its phase on every gate-low, so each game pulse threw away up to
+//  a full 35 ms half-period; vstep wandered or froze and never produced a
+//  rising ramp. Symptom (user, 2026-08-27): "never seems to rise like mame,
+//  no frenzy feeling as alien numbers decrease." Confirmed in sim: with 350 ms
+//  pulses the old model gives vstep [5,0,5,0,...], the new one [1..9].
+//  Pitch across the eight steps: INV1 104.3->121.0 Hz (+16%), INV3
+//  108.5->117.6, INV2 194.8->210.8, INV4 zigzag +13%. The literal netlist
+//  free-running astable is retained behind V_ASTABLE_FREERUN (default 0).
+//  Also RESOLVED: the 2026-08-09 "audio_we might drop writes" note — audio_we
+//  is a level, not a strobe, so no write is lost (now load-bearing).
+//  PRIOR REVISION 2026-08-27c: WARP POLARITY FLIPPED + INVADER_4
+//  TRIMMED -10 dB.
+//  (1) warp_active is now ~latch_3e[7]. Warp is ACTIVE LOW; bit 7 = 1 is
+//  idle. The old active-HIGH read ran normal play on the WARP tables from
+//  reset onward, so warp RAISED pitch and sped the march up — backwards.
+//  Confirmed three ways: the game code ($165D mask table index $12 = $7F
+//  clears bit 7, and $15C2/$15EC turn sounds on/off by clearing/setting;
+//  reset and every idle write carry bit 7 = 1), this file's own
+//  normal-play capture constants being unreachable under the old polarity,
+//  and player experience. Pitch DIRECTION is unchanged — warp still lowers.
+//  (2) MIXE_INV4 2743 -> 867. The board weights all four invaders equally
+//  and that is verified, but INV4 is the only sustained full-rail square in
+//  the ear's sensitive band and lands ~16-20 dB over its march partners.
+//  This is a deliberate, labelled perceptual departure, not a derivation
+//  fix — see the INVADER_4 PERCEPTUAL TRIM block before changing it.
+//  PRIOR REVISION 2026-08-27b: INVADER_1 AMPLITUDE CORRECTED, +6000/
+//  -2000 -> +9000/-3000. U18.3 drives R98 directly (nl_astrob.cpp:1082), so
+//  INV1 is a full-rail pulse train like INV3/INV4 — Vpp 12000, not 8000. The
+//  old value left it 3.5 dB light against the other three invaders, which all
+//  share an identical 1M summing resistor and must therefore arrive equal.
+//  Mean is still exactly zero at dbar=0.25; only the swing changed. The
+//  superseded "+/-4000 if an HP filter is added" note was a dead end (still
+//  Vpp 8000), and the HP filter it awaited is C55, already on the board at a
+//  13 Hz DC-block corner. No mixer weights touched.
+//  PRIOR REVISION 2026-08-27: OUTPUT LOW-PASS ADDED. A one-pole at
+//  2404 Hz on audio_out, standing in for the final amp (R144's feedback
+//  network, nl_astrob.cpp:321 "not emulated") plus the cabinet speaker.
+//  Nothing downstream ever filtered these voices — SegaG80.sv drives
+//  AUDIO_L/R straight from the clamped mix — so every hard square edge
+//  aliased at 48 kHz. Fixes the INVADER_4 "rasp" (its alias floor was
+//  ~17 dB hotter than INVADER_3's; see the OUTPUT LOW-PASS block for the
+//  arithmetic). Does NOT change any fundamental's level: the mixer is
+//  board-correct and INV4's ~18 dB perceptual lead over INV3 is a
+//  waveform + A-weighting property, not a weighting bug. Mixer weights,
+//  MIXE_* and OUTPUT_GAIN_LOG2 all unchanged from 12g.
+//  PRIOR REVISION 2026-08-12g: HYBRID. Keeps 12f's ATTACK_RATE polarity
 //  fix and single-shift mixer, but RESTORES 12e's MIXE_* source-amplitude
 //  compensation and OUTPUT_GAIN_LOG2 = 1. HW 2026-08-21: the 12f mix was
 //  inaudible (only EXPLOSIONS/ASTEROIDS gained; every other voice lost
@@ -142,10 +199,17 @@ module astrob_audio (
     // triggered; see INVADER_2 below. Reset to all-1s = every active-low
     // gate defaults OFF at power-up.
     //
-    // NOTE (unresolved, flagged 2026-08-09): if audio_we is a single-cycle
-    // strobe and ce_cpu a separate periodic enable, `audio_we & ce_cpu`
-    // can drop writes — a dropped "off" write is a sound that never stops.
-    // Verify at integration: count IOWRs to $3E/$3F vs latch updates.
+    // RESOLVED 2026-08-27d (was flagged unresolved 2026-08-09). The worry was
+    // that `audio_we & ce_cpu` could drop writes if audio_we were a one-cycle
+    // strobe. It is not: SegaG80_CPU.sv:621 drives audio_we_o = io_write &
+    // io_3e_3f, and io_write is `~iorq_n & ~wr_n` (:355) — a LEVEL held for
+    // the whole Z80 IO write cycle. With the CPU at clk/4 that window spans
+    // several ce_cpu pulses, so every $3E/$3F write latches (two or three
+    // times, same value — harmless). No writes are dropped.
+    //
+    // This is now load-bearing: the ATTACK_RATE staircase is clocked by the
+    // FALLING EDGE of latch_3f[4], so a dropped write would be a permanently
+    // lost staircase step, not just a late gate. See the ATTACK_RATE block.
     //------------------------------------------------------------------------
     reg [7:0] latch_3e, latch_3f;
 
@@ -173,8 +237,16 @@ module astrob_audio (
 
     // WARP ("W" = ALIAS(W, I_LO_D7), RAW un-inverted port bit — distinct
     // from "I_WARP" which is the inverted copy feeding the shared V op-amp).
-    // Active HIGH. Pure modifier; no standalone voice in the mixer netlist.
-    wire warp_active = latch_3e[7];
+    // Pure modifier; no standalone voice in the mixer netlist.
+    //
+    // POLARITY CORRECTED 2026-08-27c — was `latch_3e[7]` (active HIGH), which
+    // is inverted. Bit 7 = 1 is the IDLE state; warp is ACTIVE LOW like every
+    // other signal on this board. See the WARP POLARITY block below for the
+    // three independent confirmations. The practical effect of the old
+    // polarity: normal play ran the WARP tables (INV1 90.3 Hz, INV3 100.1 Hz,
+    // INV1 envelope 1.83 Hz) and pressing warp switched to the NORMAL ones —
+    // so warp raised pitch and sped the march up, backwards on both counts.
+    wire warp_active = ~latch_3e[7];
 
     //------------------------------------------------------------------------
     // Common voice full-scale — ADDED 2026-08-11 (SND-001).
@@ -189,8 +261,12 @@ module astrob_audio (
     // Do not scale a voice inside its own block to "make it sit right" —
     // change its MIXW_* weight instead, and only if the schematic supports
     // it. The one deliberate exception is INV1, which is asymmetric
-    // (+VOICE_FS / -VOICE_FS/3) to null its DC at mean duty 0.25; that is a
-    // waveform property, not a level.
+    // (+1.5*VOICE_FS / -0.5*VOICE_FS) to null its DC at mean duty 0.25; that
+    // is a waveform property, not a level. Note its Vpp is still 2*VOICE_FS,
+    // the same full rail every other invader swings — the asymmetry only
+    // moves where zero sits within that swing. (Corrected 2026-08-27: it used
+    // to be +VOICE_FS / -VOICE_FS/3, which is Vpp 8000 and left INV1 3.5 dB
+    // light against INV2/3/4 for no board reason. See the INVADER_1 block.)
     //------------------------------------------------------------------------
     localparam signed [15:0] VOICE_FS = 16'sd6000;
 
@@ -231,39 +307,113 @@ module astrob_audio (
     // only warp behaviour; the parameterised "schematic branch" that
     // briefly lived here has been deleted as a known-wrong dead end.
     //
-    // FOR THE NEXT PERSON WHO RE-DERIVES THIS FROM THE SCHEMATIC OR THE
-    // MAME NETLIST — read before "fixing": a naive solve of the warp path
-    // (I_WARP = 7406 OC pulling U16 pin 5 down through R164) predicts V
-    // DROPS -> pitch RISES, i.e. the OPPOSITE of the real board. Two
-    // candidate reconciliations, unproven:
-    //   (a) bit polarity: every other signal on this board is active-LOW.
-    //       If warp is too, then W=1 is the IDLE state, I_WARP sits low
-    //       during normal play, and warp RELEASES the pin-5 pulldown ->
-    //       V rises -> pitch falls. This flips the sense with the same
-    //       parts, and matches hardware.
-    //   (b) the direct W paths into the INV1/INV3 integrators (R57, R28)
-    //       dominate and the V-path analysis is a red herring.
-    //   Either way: hardware says DOWN. Do not re-introduce a pitch-up
-    //   branch without a board capture proving it.
+    // BIT POLARITY — RESOLVED 2026-08-27c. Candidate (a) below was right:
+    // WARP IS ACTIVE LOW, bit 7 = 1 is idle. `warp_active` is now ~latch_3e[7].
+    // Three independent confirmations, any one of which would settle it:
     //
-    // Consequence of (a) if ever confirmed: the baseline V table itself
-    // (7.57..4.93, solved with the pulldown released) would belong to the
-    // WARP state, and normal-play V would sit lower — worth revisiting
-    // only with a working board on the bench.
-    // ATTACK_RATE polarity CORRECTED 2026-08-12f (credit: core-side
-    // review). I_ATTACK_RATE is the RAW bit (U26 7407 non-inverting,
-    // nl_astrob.cpp:909 NET_C(I_ATTACK_RATE, R148.1, U21.5)) gating a
-    // CD4011 NAND astable -- and a NAND astable RUNS when its gate input
-    // is HIGH; LOW pins the output and freezes it. So bit HIGH = staircase
-    // climbs. The previous ~bit here was backwards (and the 12d audit
-    // table row asserting it was self-contradictory: a non-inverting
-    // buffer cannot make "runs while LOW" true on a NAND gate).
-    // NOTE: latch_3f resets to 8'hFF, so the staircase free-runs from
-    // power-up until the game's first $3F write -- same as a real board
-    // whose latch powers up in an arbitrary state; the game initialises
-    // the latch within milliseconds.
-    wire attack_run  = latch_3f[4];    // bit HIGH = oscillator released
+    //   1. GAME CODE (astrob.dasm). Port $3E is driven by two routines that
+    //      share a mask table at $165D: $15C2 turns a sound ON by ANDing the
+    //      mask (clearing an active-low bit), $15EC turns it OFF by CPL+OR
+    //      (setting it). Table index $12 is $7F — which clears bit 7 — and
+    //      $24CB does `ld a,$12 / call $15C2` to start warp while $23E0 does
+    //      `ld a,$12 / call $15EC` to stop it. Reset is $FF and every idle
+    //      write ($DE at $0A0B, $DF at $163E) carries bit 7 = 1. A board that
+    //      powered up with warp asserted and cleared it to engage warp is not
+    //      a coherent reading; bit 7 = 1 is plainly the rest state.
+    //
+    //   2. THIS FILE'S OWN CAPTURE-VALIDATED CONSTANTS. INV1_PER_NORM is the
+    //      104.3 Hz carrier MEASURED on the board during normal play, and
+    //      INV1_ENVSTEP_NORM 23695 is the 2.55 Hz envelope pinned by sideband
+    //      spacing (see the warning at INV1_ENVSTEP_NORM). Under the old
+    //      active-HIGH polarity neither was ever reachable during normal
+    //      play — the mux sat on the _WARP leg from reset onward. Constants
+    //      validated against normal-play captures that normal play cannot
+    //      select is a contradiction that only the polarity flip resolves.
+    //
+    //   3. HARDWARE / PLAYER EXPERIENCE (user, 2026-08-27): warp lowers the
+    //      tone and the invaders slow down. With the flip, idle selects
+    //      rom_i1n/rom_i3n (104.3 / 108.5 Hz) and warp selects rom_i1w/rom_i3w
+    //      (90.3 / 100.1 Hz) — pitch drops and the march slows, as observed.
+    //
+    // The pitch DIRECTION was never in doubt and has not changed: the warp
+    // tables are the low ones and stay that way. Only which port state selects
+    // them was wrong. A naive solve of the warp path (I_WARP = 7406 OC pulling
+    // U16 pin 5 down through R164) still predicts V DROPS -> pitch RISES; that
+    // solve assumes warp asserts by pulling the pin down, and confirmation 1
+    // says warp asserts by RELEASING it. Same parts, opposite sense.
+    // Do not re-introduce a pitch-up branch.
+    //
+    // Consequence now that (a) is confirmed: the baseline V table (7.57..4.93,
+    // solved with the pulldown released) is the NORMAL-play table, which is how
+    // it is used here — self-consistent. The alternative worry logged in 2026-
+    // 08-12, that it might belong to the warp state, does not apply.
+    //--------------------------------------------------------------------
+    // ATTACK_RATE — REWORKED 2026-08-27d. THE STAIRCASE IS CLOCKED BY THE
+    // GAME'S PULSES, not by a free-running internal oscillator.
+    //
+    // SYMPTOM THIS FIXES (user, 2026-08-27): "never seems to rise like mame,
+    // no frenzy feeling as alien numbers decrease." The march stayed pinned
+    // at vstep 0 for an entire wave.
+    //
+    // WHAT THE GAME ACTUALLY DOES (astrob.dasm $30A6):
+    //     30A6: ld hl,$CAB9      ; the game's OWN staircase step counter
+    //     30AA: cp $0A           ; capped at 10 = the CD4017's ten outputs
+    //     30AC: jp z,$30B6       ; at 10, stop pulsing
+    //     30AF: inc a
+    //     30B0: ld (hl),a
+    //     30B3: call $1614       ; ONE ATTACK_RATE pulse = ONE step
+    // and $1614 writes the mask ($EF, bit 4 low) then immediately $FF, so the
+    // bit dips low for ~5.7 us at 3.867 MHz.
+    //
+    // $CAB9 is seeded to 2, not 0 ($2216: `ld a,$02 / ld ($CAB9),a`), so the
+    // loop runs for a = 2..9 and issues exactly EIGHT pulses per wave. The
+    // staircase therefore climbs vstep 0 -> 8 and HOLDS there; the mod-10 wrap
+    // is never reached in normal play, so the march does not collapse back to
+    // the bottom at the end of a wave. That hold is the accelerando. The wrap
+    // does get exercised by the 30-pulse burst at $31F8 (`ld b,$1E`), which is
+    // a sweep effect and reads as three rising sweeps — intended.
+    //
+    // ON THE BOARD a pulse IS a clock edge: I_ATTACK_RATE low forces the
+    // U21 gate-B NAND output (pin 4) HIGH, and pin 4 wires straight to U15.14,
+    // the CD4017 clock (nl_astrob.cpp:920). Rising edge -> one step. So the
+    // clock lands on the FALLING edge of latch_3f[4].
+    //
+    // WHY THE OLD MODEL PRODUCED NOTHING: it treated bit 4 purely as a gate on
+    // an internal 14.3 Hz oscillator and, worse, reloaded that oscillator's
+    // phase on every gate-low (`if (!attack_run) vclk_cnt <= VSTEP_HALF`).
+    // VSTEP_HALF is 35 ms, so any pulse train faster than ~28 Hz reset the
+    // countdown before it ever expired and vstep never advanced at all. The
+    // game's pulses therefore actively PREVENTED the staircase from moving.
+    //
+    // THE FREE-RUNNING ASTABLE IS RETAINED BUT DEFAULTED OFF. The netlist does
+    // describe a gated astable (R166 1M / C67 0.05u, ~14.3 Hz) that free-runs
+    // whenever I_ATTACK_RATE is high — and $3F idles at $FF, so on a literal
+    // reading it should run continuously and wrap the CD4017 every 0.7 s. That
+    // reading cannot be right: it contradicts the game's careful ten-step
+    // bookkeeping, it contradicts MAME, and it contradicts the real cabinet
+    // (a continuously wobbling pitch, not a rising one). Something in the
+    // real U21 stage — most likely the pin-6 clipping diode that MAME does not
+    // compile by default (nl_astrob.cpp:912-918, guarded by ADD_CLIPPING_DIODES
+    // and commented "fast retriggering relies on clipping diodes") — parks the
+    // astable between pulses. Set V_ASTABLE_FREERUN to 1'b1 to restore the
+    // literal netlist behaviour and hear why it is wrong.
+    //
+    // ⚠️ This makes the latch write path load-bearing in a way it was not
+    // before: every dropped $3F write is now a LOST STAIRCASE STEP, not just a
+    // late gate. See the `audio_we & ce_cpu` note at the port latches.
+    //--------------------------------------------------------------------
+    wire attack_run  = latch_3f[4];    // bit HIGH = astable released (if used)
     wire rate_reset  = ~latch_3f[5];   // bit LOW = counter held at 0
+
+    localparam V_ASTABLE_FREERUN = 1'b0;   // 1 = literal netlist (known wrong)
+
+    // The game's pulse: falling edge of bit 4 = CD4017 clock (see above).
+    reg  attack_bit_d;
+    always @(posedge clk_sys or posedge reset) begin
+        if (reset) attack_bit_d <= 1'b1;   // matches latch_3f reset value
+        else       attack_bit_d <= latch_3f[4];
+    end
+    wire attack_pulse = attack_bit_d & ~latch_3f[4];
 
     localparam [19:0] VSTEP_HALF = 20'd540856;   // clk/(2*14.3Hz)
     reg [19:0] vclk_cnt;
@@ -283,11 +433,15 @@ module astrob_audio (
     always @(posedge clk_sys) vclk_d <= vclk_out;
     wire vclk_rise = vclk_out & ~vclk_d;
 
+    // Default: pulses only. The astable term folds away at elaboration when
+    // V_ASTABLE_FREERUN is 0, taking the counter above with it.
+    wire v_clk = attack_pulse | (V_ASTABLE_FREERUN & vclk_rise);
+
     reg [3:0] vstep;                              // U15 CD4017: 0..9, wraps
     always @(posedge clk_sys or posedge reset) begin
         if (reset)              vstep <= 4'd0;
         else if (rate_reset)    vstep <= 4'd0;
-        else if (vclk_rise)     vstep <= (vstep == 4'd9) ? 4'd0 : vstep + 4'd1;
+        else if (v_clk)         vstep <= (vstep == 4'd9) ? 4'd0 : vstep + 4'd1;
     end
 
     // ---- per-step half-period ROMs (step 0 == legacy constants) ----
@@ -341,9 +495,11 @@ module astrob_audio (
     //
     // Duty sweep dbar=0.25 +/- 0.10 (dbar read off the anomalous partial;
     // dd is the one free parameter — if over-pulsed vs board, reduce
-    // INV1_W_SPAN first). Output asymmetric +6000/-2000 so the mean is
-    // ~zero at dbar=0.25 (poor man's coupling cap; if a global HP filter
-    // is added downstream, switch to symmetric +/-4000).
+    // INV1_W_SPAN first). Output asymmetric +9000/-3000 so the mean is
+    // ~zero at dbar=0.25 while the swing stays at the board's full rail
+    // (Vpp 12000). CORRECTED 2026-08-27 from +6000/-2000 — see the amplitude
+    // note at the inv1_out assignment for why the old "+/-4000 if an HP
+    // filter is added" advice was a dead end.
     // Reference render: inv1_pwm_model.wav.
     //------------------------------------------------------------------------
     localparam [17:0] INV1_PER_NORM     = 18'd148307;  // clk/104.3Hz - 1
@@ -421,13 +577,43 @@ module astrob_audio (
         end
     end
 
-    // SND-001 2026-08-11: amplitudes now expressed against VOICE_FS. The
-    // asymmetry is retained deliberately (see VOICE_FS block) — it nulls DC
-    // at mean duty 0.25 and is a waveform property, not a level.
-    localparam signed [15:0] INV1_NEG = 16'sd2000;   // = VOICE_FS/3
+    // AMPLITUDE CORRECTED 2026-08-27 — was +6000/-2000, i.e. Vpp 8000.
+    //
+    // The asymmetry is right; the SWING was not. U18 pin 3 goes straight to
+    // R98 (nl_astrob.cpp:1082), so on the board INVADER_1 is a full-rail
+    // 0 -> +12 V pulse train: Vpp = 12000 in VOICE_FS units, the same swing
+    // INV3 and INV4 get. Emitting Vpp 8000 put this voice 3.5 dB under the
+    // other three invaders for no board reason — all four share an identical
+    // 1M summing resistor (R98..R101) and so must arrive at equal amplitude.
+    //
+    // The old block header's advice — "if a global HP filter is added
+    // downstream, switch to symmetric +/-4000" — would NOT have fixed it:
+    // +/-4000 is still Vpp 8000. And the HP filter it was waiting for already
+    // exists on the board: C55 (0.05u) sits in series between the four invader
+    // resistors and the mix node (nl_astrob.cpp:1039/1047). Corner is
+    // 1/(2*pi*253k*0.05u) = 13 Hz — 250k of four 1M in parallel on the invader
+    // side, ~3.1k of the other voices' summing resistors on the other — so it
+    // is a pure DC block that touches nothing audible.
+    //
+    // Values below are that full rail with the mean removed at dbar = 0.25:
+    // high = +12000*(1-0.25), low = -12000*0.25. Mean is EXACTLY zero at dbar,
+    // exactly as before — this changes level, not waveform.
+    //
+    // ⚠️ The DC null holds only AT the mean duty. Across the 0.05..0.45 sweep
+    // the instantaneous mean still wanders +/-2400 (was +/-1600) at the 2.55 Hz
+    // envelope rate; C55 removes that on the board and nothing here does. It is
+    // inaudible at 2.55 Hz but it is real cone excursion — if that ever needs
+    // fixing, model C55 as a shared ~13 Hz high-pass across the summed invader
+    // group. Do NOT shrink this swing again to hide it.
+    //
+    // Peak contribution at audio_out rises 4018 -> 6027 (9000*MIXE_INV1 >> 12).
+    // March-only worst case is 18081 across all four invaders, well inside the
+    // clamp; an explosion landing over the march already clipped before this.
+    localparam signed [15:0] INV1_POS = 16'sd9000;   // = 1.5 * VOICE_FS
+    localparam signed [15:0] INV1_NEG = 16'sd3000;   // = 0.5 * VOICE_FS
     wire signed [15:0] inv1_out =
         !inv1_gate              ? 16'sd0    :
-        (inv1_wid_cnt != 18'd0) ?  VOICE_FS : -INV1_NEG;
+        (inv1_wid_cnt != 18'd0) ?  INV1_POS : -INV1_NEG;
 
     //------------------------------------------------------------------------
     // INVADER_2 — REWORKED 2026-08-09. Duty-gate + Q1-Q4 binary DAC.
@@ -1376,10 +1562,88 @@ module astrob_audio (
     localparam signed [15:0] MIXE_REFILL = 16'sd3530;
     localparam signed [15:0] MIXE_LASER1 = 16'sd3530;
     localparam signed [15:0] MIXE_LASER2 = 16'sd2743;
-    localparam signed [15:0] MIXE_INV1   = 16'sd2743;
+    //------------------------------------------------------------------------
+    // INVADER_1 PERCEPTUAL TRIM — NEW 2026-08-27e. -3.5 dB.
+    //
+    // Deliberate departure, same class as the INVADER_4 trim below — NOT a
+    // derivation fix. 2743 is the board-true weight (R98 1M, identical to
+    // R99..R101).
+    //
+    // This CANCELS THE LEVEL of the 27b amplitude correction while KEEPING its
+    // waveform. 27b changed inv1_out from Vpp 8000 to the board's true full
+    // rail Vpp 12000, which is right (U18.3 drives R98 directly,
+    // nl_astrob.cpp:1082) and must not be reverted — but it also raised INV1's
+    // fundamental by 3.52 dB. 2743 * 8000/12000-equivalent = 1829 puts the
+    // voice back at exactly its pre-27b level with the correct waveform shape.
+    //
+    // Why it was wanted (user, 2026-08-27): 27b was applied while INV1 was
+    // still stuck on the warp leg at 90.3 Hz and pinned at vstep 0 — it sounded
+    // thin because it was 14 Hz flat and not climbing, and +3.5 dB was
+    // compensating for that. Once 27c (warp polarity) and 27d (staircase)
+    // fixed the actual causes, the compensation became surplus. INV1 nets
+    // +2.1 dB against this morning from the pitch fixes alone, which is the
+    // part worth keeping.
+    //
+    //   MIXE_INV1   trim     INV1 dBFS-A at vstep 0 / 8    net vs this morning
+    //     2743      0 dB        -37.7 / -35.7                  +5.6 dB
+    //     2179     -2 dB        -39.7 / -37.7                  +3.6 dB
+    //     1942     -3 dB        -40.7 / -38.7                  +2.6 dB
+    //     1829   -3.5 dB        -41.2 / -39.2                  +2.1 dB  <- DEFAULT
+    //     1375     -6 dB        -43.7 / -41.7                  -0.4 dB
+    //
+    // If INV1 ever needs raising again, raise THIS — do not touch INV1_POS /
+    // INV1_NEG, which are the board's rail and are now correct.
+    //------------------------------------------------------------------------
+    localparam signed [15:0] MIXE_INV1   = 16'sd1829;   // -3.52 dB vs 2743
     localparam signed [15:0] MIXE_INV2   = 16'sd2743;
     localparam signed [15:0] MIXE_INV3   = 16'sd2743;
-    localparam signed [15:0] MIXE_INV4   = 16'sd2743;
+
+    //------------------------------------------------------------------------
+    // INVADER_4 PERCEPTUAL TRIM — NEW 2026-08-27c. -10 dB.
+    //
+    // ⚠️ THIS IS THE ONE DELIBERATE DEPARTURE FROM THE BOARD IN THIS MIXER.
+    // It is NOT a derivation fix. Do not "correct" it back to 2743 on the
+    // grounds that the board weights all four invaders equally — that is true,
+    // verified, and exactly the problem.
+    //
+    // The board really does give INV1..INV4 identical treatment: four 1M
+    // summing resistors R98..R101 (nl_astrob.cpp:1035-1039), every one fed
+    // from a full-rail source (U18.3 / the R47-R50 tap junction / U17.3 /
+    // U38.3 at :1082 / :1107 / :1191 / :1131). Electrically they arrive equal
+    // and MIXE_INV1..3 = 2743 is right.
+    //
+    // But INV4 is the only one of the four that is a SUSTAINED, symmetric,
+    // full-amplitude square in the ear's most sensitive band (596-900 Hz,
+    // geometric mean ~730 Hz). Two effects stack on top of the equal
+    // electrical level: a square's fundamental is 4/pi of peak where INV2's
+    // sawtooth is 2/pi and INV1's 25%-duty pulse less again, and A-weighting
+    // favours 730 Hz over INV3's 108 Hz by ~17 dB. Untrimmed, INV4 lands
+    // +20.4 dB on INV1, +15.9 on INV2 and +16.8 on INV3 — and INV4 is in the
+    // mix on BOTH of the first two waves (astrob.dasm: wave descriptor offset
+    // 23 selects the $165D combination mask; wave 1 = $06 = INV1+INV4,
+    // wave 2 = $08 = INV2+INV4), so it is the voice you hear constantly.
+    //
+    // A low-pass cannot fix this — see the OUTPUT LOW-PASS block; the corner
+    // would have to sit below 730 Hz and would take SONAR, BONUS, REFILL and
+    // both LASERs with it. The real cabinet made up the difference with a
+    // speaker that had far less midrange authority than a modern flat system;
+    // this trim stands in for that. Reported by ear on hardware (user,
+    // 2026-08-27: "invader4 seems to dominate all others").
+    //
+    //   MIXE_INV4   trim    INV4 vs INV1 / INV2 / INV3
+    //     2743      0 dB      +20.4  +15.9  +16.8   (board-true, masks)
+    //     1092     -8 dB      +12.4   +7.9   +8.8
+    //      867    -10 dB      +10.4   +5.9   +6.8   <- DEFAULT
+    //      689    -12 dB       +8.4   +3.9   +4.8
+    //      547    -14 dB       +6.4   +1.9   +2.8   (INV4 stops leading)
+    //
+    // -10 dB keeps INV4 clearly the lead voice of the march — it should be
+    // prominent, it just should not mask — while halving its perceived
+    // loudness. Go to 689 or 547 if it is still too forward; do not go below
+    // 547, at which point INV4 sits level with its own march partner and
+    // ~12 dB under LASER-1, which reads as the voice having gone missing.
+    //------------------------------------------------------------------------
+    localparam signed [15:0] MIXE_INV4   = 16'sd867;    // -10.0 dB vs 2743
 
     wire signed [31:0] mix_acc =
           expl_out   * MIXE_EXPL
@@ -1436,11 +1700,102 @@ module astrob_audio (
         (mix_scaled < -32'sd32768) ? -16'sd32768 :
                                       mix_scaled[15:0];
 
+    //------------------------------------------------------------------------
+    // OUTPUT LOW-PASS — NEW 2026-08-27. Stands in for the un-emulated final
+    // amplifier + cabinet speaker.
+    //
+    // WHY: every voice in this file leaves its block as a hard-edged square or
+    // staircase with edges resolved to one clk_sys period (64.6 ns), and
+    // nothing between here and the DAC filters them — SegaG80.sv:312-317 sums
+    // astrob + speech, shifts right one, clamps, and drives AUDIO_L/R. The
+    // board did not work that way: R144's feedback network (nl_astrob.cpp:321,
+    // "part of final amp (not emulated)") and then the cabinet speaker both
+    // rolled off the top before anything reached a cone.
+    //
+    // The audible symptom is INVADER_4. It is the only voice that is a
+    // SUSTAINED, full-rail, SYMMETRIC square sitting in the ear's most
+    // sensitive band — decoding i4row (packed MSB-first, so code 0 is the last
+    // entry) gives 900/737/826/661/859/694/784/617/881... Hz, a zigzag with
+    // geometric mean ~730 Hz. At 48 kHz output its harmonics fold back:
+    // harmonic 33 lands at Nyquist only 30 dB below the fundamental, versus
+    // harmonic 231 at -47 dB for INVADER_3's 108 Hz square. That ~17 dB hotter
+    // alias floor is the "rasp" that makes INV4 read as louder than the rest
+    // of the march.
+    //
+    // ⚠️ WHAT THIS DOES *NOT* FIX — the fundamental-level gap, which is real
+    // and is NOT a mixer bug. INV1..4 all carry the same MIXE weight (2743,
+    // from four identical 1M summing resistors R98-R101, and the netlist
+    // confirms all four arrive at a full rail: nl_astrob.cpp:1082 / 1107-1108 /
+    // 1131 / 1191). The spread comes from waveform and pitch instead: a
+    // square's fundamental is 4/pi of peak, INV2's sawtooth is 2/pi, INV1's
+    // 25%-duty pulse less again, and A-weighting favours INV4's 730 Hz over
+    // INV3's 108 Hz by ~18 dB. Net, INV4's fundamental sits ~18 dB above INV3
+    // and ~24 dB above INV1 BY CONSTRUCTION. A low-pass cannot close that —
+    // the corner would have to sit below 730 Hz, which would gut SONAR, BONUS,
+    // REFILL and both LASERs with it. If the march still sits wrong after an
+    // ear check, the lever is MIXE_* or a per-voice INV4 trim, NOT this filter.
+    //
+    // ONE POLE, RUN AT clk_sys — deliberately NOT at `tick`. Filtering at the
+    // 60.42 kHz tick would first have to SAMPLE the mix at 60.42 kHz, and
+    // sampling a hard square is itself the aliasing operation this block
+    // exists to prevent. At clk_sys the filter sees every edge at full
+    // resolution and there is no pre-sampling stage.
+    //
+    //   LPF_SHIFT   f0 = clk_sys / 2^N / 2pi
+    //      0        bypass exactly (alpha = 1 -> y = x, one clock of latency)
+    //      9        4808 Hz
+    //     10        2404 Hz   <- DEFAULT
+    //     11        1202 Hz
+    //     12         601 Hz   (too dark — starts eating LASER-2 and BONUS)
+    //
+    // At 2404 Hz: INV4's fundamental is down 0.4 dB (i.e. untouched), its 3rd
+    // harmonic 2.6 dB, and components at Nyquist 20 dB — so the alias floor
+    // drops from -30 to -50 dB. SONAR (470 Hz) and the EXPLOSION / ASTEROID
+    // beds (already low-passed at 65.6 / 102.8 Hz) are unaffected. The LASER
+    // attack transient and the BONUS "deedle" DO get audibly rounder; that is
+    // the intended final-amp behaviour, but it is a real change to those two
+    // voices — ear-check them alongside the march, not just INV4.
+    //
+    // Q14 accumulator: at plain 16-bit width the >>10 increment is identically
+    // zero for any step under one output LSB and the filter stalls — the same
+    // trap the SONAR and BONUS envelope blocks document above. Fourteen
+    // fractional bits put the stall band at 1/16 LSB.
+    //------------------------------------------------------------------------
+    localparam LPF_SHIFT = 10;          // 2404 Hz; set 0 to bypass
+
+    // MUTE is applied BEFORE the filter, matching the board: MUTEFUNC
+    // (nl_astrob.cpp:1048, "if(A0>2.5,0,A1)") zeroes the MIX NODE, which is
+    // upstream of the final amp, so the step it creates gets filtered like any
+    // other signal rather than clicking straight out of the DAC.
+    wire signed [15:0] lpf_in = mute ? 16'sd0 : voice_sum_clamped;
+
+    // 32-bit accumulator. A rail-to-rail step makes |lpf_tgt - lpf_acc| reach
+    // 65535<<14 = 1073725440, which clears 31-bit signed (1073741823) by only
+    // 16383 counts — a margin too thin to design against. Do not narrow this.
+    reg  signed [31:0] lpf_acc;                                     // Q14
+    wire signed [31:0] lpf_tgt  = {{2{lpf_in[15]}}, lpf_in, 14'd0};
+    wire signed [31:0] lpf_diff = lpf_tgt - lpf_acc;
+    always @(posedge clk_sys or posedge reset) begin
+        if (reset) lpf_acc <= 32'sd0;
+        else       lpf_acc <= lpf_acc + (lpf_diff >>> LPF_SHIFT);
+    end
+
+    // Round-half-up on the way out, not truncate. The floor in the increment
+    // above parks the accumulator up to (2^LPF_SHIFT - 1) Q14 counts BELOW its
+    // target, and a plain [29:14] slice shows that as a -1 LSB DC offset — so
+    // `mute` would settle at -1 rather than digital silence. Part-selects are
+    // unsigned in Verilog, so this is a 16-bit unsigned add whose bit pattern
+    // is the correct two's-complement result; the wire declaration reinterprets
+    // it. Cannot overflow to -32768: lpf_acc is a convex combination of past
+    // inputs so it never exceeds 32767<<14, and rounding up to 32768 would
+    // require 32767*16384 + 8192.
+    wire signed [15:0] lpf_out = lpf_acc[29:14] + {15'd0, lpf_acc[13]};
+
     always @(posedge clk_sys or posedge reset) begin
         if (reset)
             audio_out <= 16'sd0;
         else
-            audio_out <= mute ? 16'sd0 : voice_sum_clamped;
+            audio_out <= lpf_out;
     end
 
 endmodule

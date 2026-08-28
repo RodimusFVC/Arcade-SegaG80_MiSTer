@@ -1,0 +1,53 @@
+<misterromdescription>
+    <about author="alanswx" webpage="https://github.com/alanswx/Arcade-SegaG80V_MiSTer"/>
+    <name>Eliminator (2 Players, cocktail)</name>
+    <setname>elim2c</setname>
+    <rbf>Arcade-SegaG80V</rbf>
+    <mameversion>0283</mameversion>
+    <year>1981</year>
+    <manufacturer>Gremlin</manufacturer>
+    <category>Shooter</category>
+    <parent>elim2</parent>
+    <players>2</players>
+    <joystick>2-way horizontal</joystick>
+    <num_buttons>2</num_buttons>
+    <!-- index 0: 48K program ROM at $0000, sin/cos PROM at $C000 -->
+    <rom index="0" zip="elim2c.zip|elim2.zip" md5="none">
+        <part name="969t.cpu-u25" crc="896a615c"/>
+        <part name="1200.prom-u1" crc="590beb6a"/>
+        <part name="1201.prom-u2" crc="fed32b30"/>
+        <part name="1202.prom-u3" crc="0a2068d0"/>
+        <part name="1203.prom-u4" crc="1f593aa2"/>
+        <part name="1204.prom-u5" crc="046f1030"/>
+        <part name="1205.prom-u6" crc="8d10b870"/>
+        <part name="1206.prom-u7" crc="7f6c5afa"/>
+        <part name="1207.prom-u8" crc="6cc74d62"/>
+        <part name="1208.prom-u9" crc="cc37a631"/>
+        <part name="1209.prom-u10" crc="844922f8"/>
+        <part name="1210.prom-u11" crc="7b289783"/>
+        <part name="1211.prom-u12" crc="17349db7"/>
+        <part name="1212.prom-u13" crc="152cf376"/>
+        <part repeat="20480">00</part>
+        <!-- $C000: sin/cos PROM, X-Y Timing board U39 -->
+        <part name="s-c.xyt-u39" crc="56484d19"/>
+        <part repeat="2048">00</part>
+        <part repeat="16384">00</part>
+    </rom>
+
+    <!-- index 1: game identifier, decoded by rtl/sega_game_pkg.sv -->
+    <rom index="1">
+        <part>00</part>
+    </rom>
+
+    <!-- Two physical DIP banks, delivered to ioctl index 254 by MiSTer. -->
+    <switches default="45,33">
+        <dip bits="0" ids="Cocktail,Upright" name="Cabinet"/>
+        <dip bits="2,3" values="1,2,3" ids="3,4,5" name="Lives"/>
+        <dip bits="4,5" ids="Easy,Medium,Hard,Hardest" name="Difficulty"/>
+        <dip bits="6,7" ids="30000,20000,10000,None" name="Bonus Life"/>
+        <dip bits="8,9,10,11" ids="4 Coins/1 Credit,3 Coins/1 Credit,2 Coins/1 Credit,1 Coin/1 Credit,1 Coin/2 Credits,1 Coin/3 Credits,1 Coin/4 Credits,1 Coin/5 Credits,1 Coin/6 Credits,2 Coins/1 Credit 5/3 6/4,2 Coins/1 Credit 4/3,1 Coin/1 Credit 5/6,1 Coin/1 Credit 4/5,1 Coin/1 Credit 2/3,1 Coin/2 Credits 5/11,1 Coin/2 Credits 4/9" name="Coin A"/>
+        <dip bits="12,13,14,15" ids="4 Coins/1 Credit,3 Coins/1 Credit,2 Coins/1 Credit,1 Coin/1 Credit,1 Coin/2 Credits,1 Coin/3 Credits,1 Coin/4 Credits,1 Coin/5 Credits,1 Coin/6 Credits,2 Coins/1 Credit 5/3 6/4,2 Coins/1 Credit 4/3,1 Coin/1 Credit 5/6,1 Coin/1 Credit 4/5,1 Coin/1 Credit 2/3,1 Coin/2 Credits 5/11,1 Coin/2 Credits 4/9" name="Coin B"/>
+    </switches>
+
+    <buttons names="Fire,Thrust,-,-,Start 1,Start 2,Coin,Pause" default="A,B,Start,Select,R,L"/>
+</misterromdescription>

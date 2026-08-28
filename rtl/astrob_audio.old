@@ -1,0 +1,1446 @@
+//============================================================================
+//
+//  Astro Blaster audio — nl_astrob.cpp netlist port (in progress)
+//
+//  MAME emulates this board with a full SPICE-style netlist
+//  (Useful Information/mame/nl_astrob.cpp, 1218 lines) of discrete analog
+//  circuitry: NE555 timers, an MM5837 noise generator, CD4017/CD4024
+//  counters, and passive resistor mixing. There is no sound chip.
+//  See Claude/astrob_audio_board_notes_2026-07-26.md for the full scope
+//  and the three-route decision (this file implements the "port the
+//  netlist to RTL" route).
+//
+//  Each voice is a digital approximation of its analog stage (RC decay ->
+//  leaky counter, 555 astable -> period counter, etc.), not a literal
+//  SPICE solve. Building voice-by-voice; status below. Parameters marked
+//  #unverified are schematic-derived best guesses per user direction
+//  2026-07-26 ("tune later, best shot for now") — expect ear/HW tuning.
+//
+//  Port $3E (LO) bit -> signal   | Port $3F (HI) bit -> signal
+//    0 I_INVADER_1   [REWORKED: PWM model, see block]   0 I_LASER_1
+//    1 I_INVADER_2   [REWORKED: duty-gate + Q1-Q4 DAC]  1 I_LASER_2
+//    2 I_INVADER_3   [REWORKED: + U22 FM warble]        2 I_SHORT_EXPL
+//    3 I_INVADER_4   [REWORKED: + U28 staircase sweep]  3 I_LONG_EXPL
+//    4 I_ASTROIDS                  4 I_ATTACK_RATE (V-generator input, not built)
+//    5 I_MUTE        [DONE]        5 I_RATE_RESET  (V-generator input, not built)
+//    6 I_REFILL                    6 I_BONUS
+//    7 I_WARP        [DONE, modifier only, no standalone sound]  7 I_SONAR
+//  (verified against nl_astrob.cpp ALIAS lines directly — NOT the older
+//  segag80r_a.cpp discrete-component driver a previous placeholder
+//  borrowed its trigger/decay assumptions and bit mapping from; that
+//  mapping was wrong, e.g. it fired "laser" off LO bit7/WARP)
+//
+//  clk_sys = 15.468480 MHz (SegaG80 core system clock).
+//
+//  REVISION 2026-08-12g (this file): HYBRID. Keeps 12f's ATTACK_RATE polarity
+//  fix and single-shift mixer, but RESTORES 12e's MIXE_* source-amplitude
+//  compensation and OUTPUT_GAIN_LOG2 = 1. HW 2026-08-21: the 12f mix was
+//  inaudible (only EXPLOSIONS/ASTEROIDS gained; every other voice lost
+//  16-25 dB); 12e was clear. Level table in the MIXE_* block below.
+//  PRIOR REVISION 2026-08-12f: ATTACK_RATE polarity CORRECTED (bit
+//  HIGH = staircase runs; the NAND-astable gate is non-inverted -- credit
+//  to the core-side review, which also contributed the single-shift mixer
+//  adopted here). The core-side MIXE_* cube-root weight compression is
+//  NOT adopted: it boosts the invader march +31 dB relative and was
+//  heard on hardware as the march masking explosions. The equal-Vpp
+//  caveat behind it is real but bounded (a few dB per voice), to be
+//  settled by per-stage Vpp measurement, not spread compression. See
+//  sv_changes.md 2026-08-12f for the level table.
+//  PRIOR REVISION 2026-08-12e: MM5837 LFSR lockup guard — the
+//  all-zero absorbing state (reachable via zero-init when reset never
+//  pulses) silenced both noise voices into DC envelope pulses. One OR
+//  term makes it self-starting from any state. Found via a harness that
+//  reproduced exactly that un-reset power-up; hardware with a working
+//  reset was never affected.
+//  PRIOR REVISION 2026-08-12d: OUTPUT_GAIN_LOG2 added (default 2,
+//  +12 dB master gain after the authentic mix) — the board-true relative
+//  levels are correct but absolutely quiet; real cabinets made this up in
+//  the power amp. Also: full trigger-polarity audit vs nl_astrob.cpp
+//  input buffers (U26/U29 7407 non-inverting, U30/U31 7406 inverting) —
+//  every mapping and edge sense CONFIRMED matching; the wave-launch
+//  difference vs MAME is MAME's own documented sonar/bonus trigger
+//  failure, not a discrepancy here (see sv_changes.md 2026-08-12d).
+//  PRIOR REVISION 2026-08-12c: SONAR + BONUS — the board is now
+//  COMPLETE, all sixteen latch functions implemented. SONAR is calibrated
+//  against a MAME gameplay capture (sonar.wav): four near-sine oscillators
+//  469.15/471.63/473.56/480.93 Hz — these encode MAME's FRND random seed,
+//  not a real board; a hardware capture supersedes them (see the SONAR
+//  block). BONUS ("the deedle") is netlist-nominal: 555 alternating
+//  1501/1448 Hz at OSC4's 7.19 Hz, envelope = C34 recovering through
+//  R77 (tau 3.47 s). Envelope accumulators widened to 24 bits after a
+//  quantisation bug (see sv_changes.md 2026-08-12c).
+//  PRIOR REVISION 2026-08-12b: FIVE NEW VOICES — LASER_1, LASER_2,
+//  SHORT/LONG EXPLOSIONS, ASTEROIDS, REFILL, all derived from
+//  nl_astrob.cpp (laser VCOs port MAME's calibrated HLE quintics). Adds
+//  shared DSP infrastructure: 60.4 kHz tick, MM5837 LFSR (single instance
+//  feeding both noise voices, board-true correlation), fixed-point SVF
+//  filters. MIX_MAKEUP_LOG2 dropped 7 -> 1 (permanent) now that the loud
+//  voices exist. Remaining unported: SONAR, BONUS (deferred: broken in
+//  MAME's own netlist; calibrate against board captures only). All five
+//  new voices are netlist-nominal — no captures exist — flag for ear
+//  check. See sv_changes.md 2026-08-12b.
+//  PRIOR REVISION 2026-08-12: WARP POLARITY RESOLVED — hardware
+//  confirmation that warp always lowers pitch / slows. Capture tables
+//  (rom_i1w/rom_i3w) are the sole warp behaviour; the WARP_SCHEMATIC
+//  branch and its per-voice constants are deleted. See the V GENERATOR
+//  block for why the naive schematic solve predicts the opposite and
+//  must not be re-introduced without a board capture.
+//  PRIOR REVISION 2026-08-11b: FREQUENCY AUDIT vs nl_astrob.cpp.
+//  Three corrections: (1) V-staircase per-voice ROMs were 3.0-3.8x too
+//  steep -- the 10k coupling into pin 5's internal divider attenuates V's
+//  swing by ~4x and had been omitted; step 0 anchors unchanged. (2) INV4
+//  CV model replaced: netlist confirms mirror-image tap weights (heaviest
+//  on Q1) plus a direct R34 path from V -- the tone is a 596-900 Hz
+//  zigzag at ~34 Hz, not a smooth ramp; old scattered spot measurements
+//  fall on the new table. (3) Warp schematic-branch constants recomputed
+//  per voice with the divider (+8 to +15%, not +40%), and extended to
+//  INV2/INV4 which the netlist says warp must reach via V. Confirmed
+//  correct, no change: mixer weights, INV2 tap conductances, V ladder
+//  values, OSC3 15.3 Hz hold gating, INV4 mod-16 self-reset (U28.2<-Q5).
+//  See sv_changes.md 2026-08-11b section.
+//  PRIOR REVISION 2026-08-11: MIXER REWORKED — U7's eleven summing
+//  resistors (4.7k..1M, a 46.6 dB spread) are now applied as explicit
+//  per-voice weights instead of a flat sum, with the seven unbuilt voices
+//  stubbed at zero so they land at the right level when written. All voice
+//  blocks now emit a common VOICE_FS; INVADER_2's DAC weights corrected
+//  from idealised 1:2:4:8 to the true tap conductances. V generator
+//  independently re-derived from the schematic and confirmed (no change).
+//  Warp polarity is now a one-bit parameter, default unchanged.
+//  See sv_changes.md for the full list and the two findings that were
+//  logged rather than fixed.
+//  PRIOR REVISION 2026-08-09b: V GENERATOR ADDED — $3F bits 4/5
+//  (ATTACK_RATE / RATE_RESET) now drive the CD4017 staircase; all four
+//  invader pitches step through 10 levels per the R152-R161 ladder. Also:
+//  free-run fix (modulators no longer restart on gate). See V GENERATOR
+//  block for the warp-polarity open question.
+//  PRIOR REVISION 2026-08-09: four invader voices reworked per
+//  sideband analysis + netlist re-derivation. Every constant below still
+//  bakes in V ~= 7.6V (the attack-rate staircase parked at Q0, which is
+//  where all board captures to date were taken). When the V generator is
+//  built, route it into the half-period math instead of re-tuning.
+//  Reference renders per voice: astrob_*.wav; derivations:
+//  AstroBlaster_verilog.md.
+//
+//============================================================================
+
+module astrob_audio (
+    input                     clk_sys,
+    input                     reset,
+
+    // Z80 writes to ports $3E (addr=0) / $3F (addr=1)
+    input                     audio_we,
+    input                     audio_addr,     // 0 = $3E, 1 = $3F
+    input               [7:0] audio_din,
+    input                     ce_cpu,
+
+    output reg signed  [15:0] audio_out
+);
+
+    //------------------------------------------------------------------------
+    // Port latches — level state. Most voices on this board are gated
+    // directly by a 555's RESET pin (sustained gate), not one-shot
+    // triggered; see INVADER_2 below. Reset to all-1s = every active-low
+    // gate defaults OFF at power-up.
+    //
+    // NOTE (unresolved, flagged 2026-08-09): if audio_we is a single-cycle
+    // strobe and ce_cpu a separate periodic enable, `audio_we & ce_cpu`
+    // can drop writes — a dropped "off" write is a sound that never stops.
+    // Verify at integration: count IOWRs to $3E/$3F vs latch updates.
+    //------------------------------------------------------------------------
+    reg [7:0] latch_3e, latch_3f;
+
+    always @(posedge clk_sys or posedge reset) begin
+        if (reset) begin
+            latch_3e <= 8'hFF;
+            latch_3f <= 8'hFF;
+        end else if (audio_we & ce_cpu) begin
+            if (audio_addr == 1'b0) latch_3e <= audio_din;
+            else                    latch_3f <= audio_din;
+        end
+    end
+
+    // I_MUTE = I_LO_D5 directly (no inverting buffer in its path) — active
+    // HIGH, per nl_astrob.cpp's MUTEFUNC ("if(A0>2.5,0,A1)"): bit=1 silences
+    // the whole mix, bit=0 is normal.
+    wire mute = latch_3e[5];
+
+    // Invader gates: I_INVADER_n drives a 555 RESET via 7406 open-collector
+    // inverter + pull-up (R73/R70/R23/R88). Port bit 0 -> run, 1 -> silent.
+    wire inv1_gate = ~latch_3e[0];
+    wire inv2_gate = ~latch_3e[1];
+    wire inv3_gate = ~latch_3e[2];
+    wire inv4_gate = ~latch_3e[3];
+
+    // WARP ("W" = ALIAS(W, I_LO_D7), RAW un-inverted port bit — distinct
+    // from "I_WARP" which is the inverted copy feeding the shared V op-amp).
+    // Active HIGH. Pure modifier; no standalone voice in the mixer netlist.
+    wire warp_active = latch_3e[7];
+
+    //------------------------------------------------------------------------
+    // Common voice full-scale — ADDED 2026-08-11 (SND-001).
+    //
+    // Every voice block now leaves at +/-VOICE_FS regardless of how it is
+    // generated; all level differences between voices are applied ONCE, in
+    // the mixer, from the board's summing resistors. Before this, each block
+    // picked its own amplitude and the mixer summed them flat, which meant
+    // the relative levels were an accident of whatever each block happened
+    // to emit.
+    //
+    // Do not scale a voice inside its own block to "make it sit right" —
+    // change its MIXW_* weight instead, and only if the schematic supports
+    // it. The one deliberate exception is INV1, which is asymmetric
+    // (+VOICE_FS / -VOICE_FS/3) to null its DC at mean duty 0.25; that is a
+    // waveform property, not a level.
+    //------------------------------------------------------------------------
+    localparam signed [15:0] VOICE_FS = 16'sd6000;
+
+    //------------------------------------------------------------------------
+    // V GENERATOR — NEW 2026-08-09. The attack-rate staircase.
+    //
+    // Board: I_ATTACK_RATE (LO on $3F bit4 path via U26 7407 OC) releases a
+    // CD4011 gate oscillator (U21, R166=1M, C67=0.05u, ~14.3 Hz) which
+    // clocks U15 (CD4017, decade, wraps 0..9). I_RATE_RESET ($3F bit5 via
+    // U31 7406): bit LOW -> U15.15 pulled to +12V -> counter HELD at 0.
+    // Each decoded output drives one ladder resistor (R161 120k .. R152
+    // 22k) into U16's summing node; V = U16.7 steps 7.57V .. 4.93V.
+    // Every voice CV rides V, so pitch rises through the wave — the
+    // level-1 accelerando this file previously lacked (all constants were
+    // captured with the staircase stuck at step 0 on the faulty board).
+    //
+    // Implementation: vstep 0..9 indexes per-voice half-period ROMs,
+    // generated from the solved op-amp voltages + 555 CV equations,
+    // normalized so step 0 = the existing capture-validated constants
+    // (nothing already tuned changes at step 0).
+    //
+    // LADDER INDEPENDENTLY VERIFIED 2026-08-11 (backlog SND-004) — no
+    // change required. Solving R152..R161 straight off dwg 800-3122 sht 7
+    // (diode-isolated CD4017 outputs into R178 22k) gives a RAW ladder node
+    // of 1.77 V at step 0 rising to 5.70 V at step 9. Running that through
+    // an inverting U16 stage of gain -0.671 with a +8.755 V offset
+    // reproduces this file's 7.57 V .. 4.93 V to within 0.02 V at both
+    // endpoints, and feeding it through a standard 555 CV model matches the
+    // rom_i2 table to within +/-3% at every intermediate step. Two
+    // independent derivations landing that close is confirmation, so the
+    // "#unverified" flag on the staircase can come off. The residual +/-3%
+    // bow is within the difference between CV models and is not worth
+    // chasing without a board capture.
+    //
+    // WARP POLARITY — RESOLVED 2026-08-12 (hardware ground truth, per
+    // user): warp LOWERS pitch / slows the march. The capture-derived
+    // tables (rom_i1w / rom_i3w) encode exactly that and are the one and
+    // only warp behaviour; the parameterised "schematic branch" that
+    // briefly lived here has been deleted as a known-wrong dead end.
+    //
+    // FOR THE NEXT PERSON WHO RE-DERIVES THIS FROM THE SCHEMATIC OR THE
+    // MAME NETLIST — read before "fixing": a naive solve of the warp path
+    // (I_WARP = 7406 OC pulling U16 pin 5 down through R164) predicts V
+    // DROPS -> pitch RISES, i.e. the OPPOSITE of the real board. Two
+    // candidate reconciliations, unproven:
+    //   (a) bit polarity: every other signal on this board is active-LOW.
+    //       If warp is too, then W=1 is the IDLE state, I_WARP sits low
+    //       during normal play, and warp RELEASES the pin-5 pulldown ->
+    //       V rises -> pitch falls. This flips the sense with the same
+    //       parts, and matches hardware.
+    //   (b) the direct W paths into the INV1/INV3 integrators (R57, R28)
+    //       dominate and the V-path analysis is a red herring.
+    //   Either way: hardware says DOWN. Do not re-introduce a pitch-up
+    //   branch without a board capture proving it.
+    //
+    // Consequence of (a) if ever confirmed: the baseline V table itself
+    // (7.57..4.93, solved with the pulldown released) would belong to the
+    // WARP state, and normal-play V would sit lower — worth revisiting
+    // only with a working board on the bench.
+    // ATTACK_RATE polarity CORRECTED 2026-08-12f (credit: core-side
+    // review). I_ATTACK_RATE is the RAW bit (U26 7407 non-inverting,
+    // nl_astrob.cpp:909 NET_C(I_ATTACK_RATE, R148.1, U21.5)) gating a
+    // CD4011 NAND astable -- and a NAND astable RUNS when its gate input
+    // is HIGH; LOW pins the output and freezes it. So bit HIGH = staircase
+    // climbs. The previous ~bit here was backwards (and the 12d audit
+    // table row asserting it was self-contradictory: a non-inverting
+    // buffer cannot make "runs while LOW" true on a NAND gate).
+    // NOTE: latch_3f resets to 8'hFF, so the staircase free-runs from
+    // power-up until the game's first $3F write -- same as a real board
+    // whose latch powers up in an arbitrary state; the game initialises
+    // the latch within milliseconds.
+    wire attack_run  = latch_3f[4];    // bit HIGH = oscillator released
+    wire rate_reset  = ~latch_3f[5];   // bit LOW = counter held at 0
+
+    localparam [19:0] VSTEP_HALF = 20'd540856;   // clk/(2*14.3Hz)
+    reg [19:0] vclk_cnt;
+    reg        vclk_out, vclk_d;
+    always @(posedge clk_sys or posedge reset) begin
+        if (reset) begin
+            vclk_cnt <= VSTEP_HALF; vclk_out <= 1'b0;
+        end else if (!attack_run) begin
+            vclk_cnt <= VSTEP_HALF;               // gate input LOW: NAND
+                                                  // output pinned, osc held
+        end else if (vclk_cnt == 20'd0) begin
+            vclk_cnt <= VSTEP_HALF; vclk_out <= ~vclk_out;
+        end else begin
+            vclk_cnt <= vclk_cnt - 20'd1;
+        end
+    end
+    always @(posedge clk_sys) vclk_d <= vclk_out;
+    wire vclk_rise = vclk_out & ~vclk_d;
+
+    reg [3:0] vstep;                              // U15 CD4017: 0..9, wraps
+    always @(posedge clk_sys or posedge reset) begin
+        if (reset)              vstep <= 4'd0;
+        else if (rate_reset)    vstep <= 4'd0;
+        else if (vclk_rise)     vstep <= (vstep == 4'd9) ? 4'd0 : vstep + 4'd1;
+    end
+
+    // ---- per-step half-period ROMs (step 0 == legacy constants) ----
+    //
+    // REGENERATED 2026-08-11 against nl_astrob.cpp. The previous tables
+    // were 3.0-3.8x too steep: they were computed as if V drove each 555's
+    // pin 5 directly, but the netlist (and board) couple V through a 10k
+    // resistor (R87/R71/R53) into pin 5's internal divider -- Thevenin
+    // ~3.33k to 8V -- so only ~1/4 of V's swing reaches the CV pin:
+    // CV = (V + 24)/4. Step 0 is still anchored to the capture-validated
+    // constants (unchanged); every other step is that anchor times the
+    // netlist-exact period ratio. Total staircase pitch rise is now
+    // +17.9% (INV1), +9.1% (INV2), +9.3% (INV3) -- not +93%/+34%/+34%.
+    // INV4 moved to its own ROM below (see the INVADER_4 block).
+    reg [17:0] rom_i1n, rom_i1w;   // INV1 period (norm/warp)
+    reg [15:0] rom_i2;             // INV2 osc half
+    reg [16:0] rom_i3n, rom_i3w;   // INV3 center half (norm/warp)
+    always @* begin
+        case (vstep)
+        4'd0: begin rom_i1n=18'd148307; rom_i1w=18'd171299; rom_i2=16'd2481; rom_i3n=17'd71284; rom_i3w=17'd77265; end
+        4'd1: begin rom_i1n=18'd145754; rom_i1w=18'd168350; rom_i2=16'd2458; rom_i3n=17'd70596; rom_i3w=17'd76519; end
+        4'd2: begin rom_i1n=18'd143206; rom_i1w=18'd165407; rom_i2=16'd2434; rom_i3n=17'd69909; rom_i3w=17'd75774; end
+        4'd3: begin rom_i1n=18'd142104; rom_i1w=18'd164134; rom_i2=16'd2424; rom_i3n=17'd69612; rom_i3w=17'd75452; end
+        4'd4: begin rom_i1n=18'd139952; rom_i1w=18'd161649; rom_i2=16'd2404; rom_i3n=17'd69031; rom_i3w=17'd74823; end
+        4'd5: begin rom_i1n=18'd137260; rom_i1w=18'd158540; rom_i2=16'd2379; rom_i3n=17'd68306; rom_i3w=17'd74037; end
+        4'd6: begin rom_i1n=18'd134450; rom_i1w=18'd155294; rom_i2=16'd2354; rom_i3n=17'd67548; rom_i3w=17'd73216; end
+        4'd7: begin rom_i1n=18'd130506; rom_i1w=18'd150739; rom_i2=16'd2317; rom_i3n=17'd66485; rom_i3w=17'd72063; end
+        4'd8: begin rom_i1n=18'd127870; rom_i1w=18'd147694; rom_i2=16'd2293; rom_i3n=17'd65774; rom_i3w=17'd71293; end
+        default: begin rom_i1n=18'd125757; rom_i1w=18'd145253; rom_i2=16'd2274; rom_i3n=17'd65204; rom_i3w=17'd70675; end
+        endcase
+    end
+
+    //------------------------------------------------------------------------
+    // INVADER_1 — REWORKED 2026-08-09. PWM model.
+    //
+    // Real circuit: U23 555 astable (R85=150k, R86=10k, C38=0.1u) sets a
+    // FIXED trigger rate ~104.3 Hz (measured; formula gives 85-104 across
+    // plausible CV). U18 555 monostable sets pulse WIDTH; U22-C/D (TL084,
+    // R55=2.2M, C21/C22=0.33u relaxation osc, ~2.55 Hz) drives Q8 (2N4403
+    // current source) into C37, sweeping U18's width. So: fixed-rate pulse
+    // train, duty swept at 2.55 Hz — pulse-width modulation, NOT AM or FM.
+    //
+    // Evidence: sidebands repeat at fixed ratio across partials 1-3
+    // (PWM masquerades as AM while pi*n*dbar is small) with a single-
+    // partial anomaly around n=4-5 (sinc-null fingerprint, dbar ~= 0.25).
+    // Warp (R57 path from U30.6) moves BOTH carrier (104.3 -> 90.3 Hz,
+    // -13.4%) and envelope rate (2.55 -> 1.83 Hz, measured sideband
+    // spacings). Old divided-tap model reproduced the harmonic ladder by
+    // arithmetic coincidence (6674/64 = 104.3) but had no modulator ->
+    // constant tone.
+    //
+    // Duty sweep dbar=0.25 +/- 0.10 (dbar read off the anomalous partial;
+    // dd is the one free parameter — if over-pulsed vs board, reduce
+    // INV1_W_SPAN first). Output asymmetric +6000/-2000 so the mean is
+    // ~zero at dbar=0.25 (poor man's coupling cap; if a global HP filter
+    // is added downstream, switch to symmetric +/-4000).
+    // Reference render: inv1_pwm_model.wav.
+    //------------------------------------------------------------------------
+    localparam [17:0] INV1_PER_NORM     = 18'd148307;  // clk/104.3Hz - 1
+    localparam [17:0] INV1_PER_WARP     = 18'd171299;  // clk/90.3Hz  - 1
+    // TUNE-REVERT-2026-08-09: Ian's originals below, uncomment to restore
+    // localparam [17:0] INV1_W_MIN        = 18'd22246;   // 0.15 * INV1_PER_NORM
+    // localparam [17:0] INV1_W_SPAN       = 18'd29661;   // 0.20 * INV1_PER_NORM
+    //
+    // Depth retuned against ab_wavs/Fixed real_inv1.wav + Original Sounds/
+    // Invader 1.wav (two independent cuts, agreeing on depth 0.52-0.53).
+    // Ian's span rendered depth 0.25 with the +-1 sideband at -15 dB vs the
+    // board's -8. Doubling the swing lands depth 0.53 and the sideband at -8.
+    //
+    // ⚠️ RATE IS UNCHANGED AND MUST STAY 23695. A 2026-08-09 attempt to move it
+    // to 22801 ("2.65 Hz") was WRONG: that rate came from an envelope-FFT with
+    // only 0.25-0.33 Hz resolution on a 3-4 s clip. The SIDEBAND SPACING in the
+    // audio spectrum is the high-resolution measurement of the same quantity,
+    // and it reads 2.54-2.56 Hz on the board and 2.54 Hz at 23695. Changing it
+    // pushed spacing to 2.66 and broke a match that was already correct.
+    // Measure modulation rate from sideband spacing, never the envelope FFT.
+    localparam [15:0] INV1_ENVSTEP_NORM = 16'd23695;   // (clk/2.55Hz)/256 — correct
+    localparam [15:0] INV1_ENVSTEP_WARP = 16'd33018;   // (clk/1.83Hz)/256  #unverified,
+                                                       // no isolated warp capture exists
+    localparam [17:0] INV1_W_MIN        = 18'd7415;    // 0.05 * INV1_PER_NORM
+    localparam [17:0] INV1_W_SPAN       = 18'd59323;   // 0.40 * INV1_PER_NORM
+                                                       // => duty 0.05..0.45, mean 0.25
+                                                       // (was 0.15..0.35): same mean,
+                                                       // double the swing
+
+    // V-STEP 2026-08-09: period now comes from the staircase ROM.
+    // (INV1_PER_NORM/WARP retained above as documentation of step 0.)
+    wire [17:0] inv1_period  = warp_active ? rom_i1w : rom_i1n;
+    wire [15:0] inv1_envstep = warp_active ? INV1_ENVSTEP_WARP : INV1_ENVSTEP_NORM;
+
+    // 8-bit sawtooth envelope (U22-C/D + Q8), one ramp per envelope cycle
+    reg [15:0] inv1_env_pre;
+    reg  [7:0] inv1_env;
+    always @(posedge clk_sys or posedge reset) begin
+        // FREE-RUN FIX 2026-08-09: U22-C/D is not gated on the board — only
+        // the 555 RESET pins are. Clearing this on !gate restarted the march
+        // envelope from minimum duty on every gate pulse; with the retuned
+        // W_MIN=0.05 that made pulsed-gate games nearly silent (level-1 bug).
+        if (reset) begin
+            inv1_env <= 8'd0;  inv1_env_pre <= 16'd0;
+        end else if (inv1_env_pre >= inv1_envstep) begin
+            inv1_env <= inv1_env + 8'd1;   // wraps: sawtooth
+            inv1_env_pre <= 16'd0;
+        end else begin
+            inv1_env_pre <= inv1_env_pre + 16'd1;
+        end
+    end
+
+    // width latched once per carrier period (matches U18 monostable reload)
+    // (product needs 26 bits: 18-bit span * 8-bit env — a self-determined
+    //  18-bit multiply here wraps for env > 8; caught in sim 2026-08-09)
+    wire [25:0] inv1_w_prod = INV1_W_SPAN * inv1_env;
+    wire [17:0] inv1_width  = INV1_W_MIN + inv1_w_prod[25:8];
+
+    reg [17:0] inv1_per_cnt, inv1_wid_cnt;
+    always @(posedge clk_sys or posedge reset) begin
+        // Async-reset branch must test ONLY `reset` (Quartus 17.0 error 10200);
+        // the gate clear is the same values, moved to a sync branch.
+        if (reset) begin
+            inv1_per_cnt <= 18'd0;
+            inv1_wid_cnt <= 18'd0;
+        end else if (!inv1_gate) begin
+            inv1_per_cnt <= 18'd0;
+            inv1_wid_cnt <= 18'd0;
+        end else if (inv1_per_cnt == 18'd0) begin
+            inv1_per_cnt <= inv1_period;
+            inv1_wid_cnt <= inv1_width;
+        end else begin
+            inv1_per_cnt <= inv1_per_cnt - 18'd1;
+            if (inv1_wid_cnt != 18'd0) inv1_wid_cnt <= inv1_wid_cnt - 18'd1;
+        end
+    end
+
+    // SND-001 2026-08-11: amplitudes now expressed against VOICE_FS. The
+    // asymmetry is retained deliberately (see VOICE_FS block) — it nulls DC
+    // at mean duty 0.25 and is a waveform property, not a level.
+    localparam signed [15:0] INV1_NEG = 16'sd2000;   // = VOICE_FS/3
+    wire signed [15:0] inv1_out =
+        !inv1_gate              ? 16'sd0    :
+        (inv1_wid_cnt != 18'd0) ?  VOICE_FS : -INV1_NEG;
+
+    //------------------------------------------------------------------------
+    // INVADER_2 — REWORKED 2026-08-09. Duty-gate + Q1-Q4 binary DAC.
+    //
+    // U13 555 astable (R81=10k, R82=100k, C36=2200pF, ~3117 Hz nominal /
+    // ~3312 Hz at V=7.57) clocks U12 CD4024. Two corrections vs the old
+    // block:
+    //
+    // 1) OSC3 (CLOCK(OSC3, 15.3): CD4011 R22=470k/C5=0.1u, ~50% duty) goes
+    //    to U12's ACTIVE-HIGH RESET as a LEVEL — the counter is HELD at
+    //    zero for half of every 65.4 ms cycle, not pulse-reset. That hold
+    //    is the 15.3 Hz "machine-gun" gating. Board evidence: measured
+    //    peaks are ALL integer multiples of 15.29 Hz, odd-only at the low
+    //    end (45.9=3x, 76.5=5x, no 2x) — the signature of a ~square gate.
+    //    (An envelope LUT fits the same data with more parameters; the
+    //    hold needs none.)
+    //
+    // 2) Tap ladder is Q1..Q4 = /2../16 (U12 pins 12/11/9/6 -> R48 82k /
+    //    R49 39k / R50 22k / R47 10k), binary weighted with the MSB on the
+    //    /16 tap: a 16-step SAWTOOTH at f0/16 ~= 195-207 Hz. Old block
+    //    used div[3..6] (one tap right, three octaves slow) with the
+    //    weight order inverted — dominant peak landed right by luck,
+    //    waveform was a scrambled staircase.
+    //
+    // Reference render: astrob_invader2.wav. Zero fitted parameters.
+    //------------------------------------------------------------------------
+    localparam [15:0] INV2_HALF_PERIOD = 16'd2481;    // clk/(2*3117Hz), nominal
+    localparam [19:0] INV2_GATE_HALF   = 20'd505671;  // clk/(2*15.29Hz), OSC3
+
+
+    reg [15:0] inv2_osc_cnt;
+    reg        inv2_osc_out;
+    always @(posedge clk_sys or posedge reset) begin
+        if (reset) begin
+            inv2_osc_cnt <= INV2_HALF_PERIOD;
+            inv2_osc_out <= 1'b0;
+        end else if (!inv2_gate) begin
+            inv2_osc_cnt <= INV2_HALF_PERIOD;
+            inv2_osc_out <= 1'b0;
+        end else if (inv2_osc_cnt == 16'd0) begin
+            inv2_osc_cnt <= rom_i2;               // V-STEP 2026-08-09
+            inv2_osc_out <= ~inv2_osc_out;
+        end else begin
+            inv2_osc_cnt <= inv2_osc_cnt - 16'd1;
+        end
+    end
+
+    reg inv2_osc_out_d;
+    always @(posedge clk_sys or posedge reset) begin
+        if (reset) inv2_osc_out_d <= 1'b0;
+        else       inv2_osc_out_d <= inv2_osc_out;
+    end
+    wire inv2_osc_rise = inv2_osc_out & ~inv2_osc_out_d;
+
+    // OSC3 as a 50%-duty LEVEL (was: single-cycle reset pulse)
+    reg [19:0] inv2_g_cnt;
+    reg        inv2_hold;                 // high = U12 held in reset
+    always @(posedge clk_sys or posedge reset) begin
+        if (reset) begin
+            inv2_g_cnt <= INV2_GATE_HALF;
+            inv2_hold  <= 1'b0;
+        // FREE-RUN FIX 2026-08-09: OSC3 free-runs; no phase resync on gate.
+        end else if (inv2_g_cnt == 20'd0) begin
+            inv2_g_cnt <= INV2_GATE_HALF;
+            inv2_hold  <= ~inv2_hold;
+        end else begin
+            inv2_g_cnt <= inv2_g_cnt - 20'd1;
+        end
+    end
+
+    reg [6:0] inv2_div;   // CD4024 equivalent (only [3:0] used in the DAC)
+    always @(posedge clk_sys or posedge reset) begin
+        if (reset)                          inv2_div <= 7'd0;
+        else if (!inv2_gate || inv2_hold)   inv2_div <= 7'd0;   // HELD, not pulsed
+        else if (inv2_osc_rise)             inv2_div <= inv2_div + 7'd1;
+    end
+
+    // Q1..Q4 resistor DAC.
+    //
+    // SND-002 FIX 2026-08-11: weights are now the true tap CONDUCTANCES,
+    // not idealised binary. The ladder is R48 82k / R49 39k / R50 22k /
+    // R47 10k, and 1/R for those is 1 : 2.103 : 3.727 : 8.200 — close to
+    // binary but not binary. Q3 was 7.3% too heavy and Q4 2.5% too light
+    // under the old 1:2:4:8, which tilts every step of the 16-step
+    // staircase and puts energy in the wrong harmonics. Integers below are
+    // the conductance ratios x256, exact to <0.1%.
+    //
+    // (Same correction will be needed for the LASER voices when they land:
+    //  U19/U14 taps are 82k/39k/22k/10k/10k on Q1,Q2,Q3,Q4,Q6 — note Q5
+    //  is SKIPPED on the board, so /32 must be absent from the sum.)
+    // Weights are pre-scaled so the four sum to exactly VOICE_FS (6000) —
+    // this also lands SND-001's normalisation for free, with no runtime
+    // divide. This voice used to leave the block at +/-10500 while INV1/3/4
+    // left at +/-6000: 4.9 dB hot against three voices that share an
+    // identical 1M summing resistor (R98..R101) and so must arrive equal.
+    // Ratio error vs true conductances is under 0.1% on every tap.
+    localparam signed [15:0] INV2_W_Q1 = 16'sd399;    // /2   R48 82k
+    localparam signed [15:0] INV2_W_Q2 = 16'sd839;    // /4   R49 39k
+    localparam signed [15:0] INV2_W_Q3 = 16'sd1488;   // /8   R50 22k
+    localparam signed [15:0] INV2_W_Q4 = 16'sd3274;   // /16  R47 10k
+                                                      // sum = 6000 = VOICE_FS
+
+    wire signed [15:0] inv2_tap_sum =
+        (inv2_div[0] ?  INV2_W_Q1 : -INV2_W_Q1) +
+        (inv2_div[1] ?  INV2_W_Q2 : -INV2_W_Q2) +
+        (inv2_div[2] ?  INV2_W_Q3 : -INV2_W_Q3) +
+        (inv2_div[3] ?  INV2_W_Q4 : -INV2_W_Q4);
+
+    wire signed [15:0] inv2_out = inv2_gate ? inv2_tap_sum : 16'sd0;
+
+    //------------------------------------------------------------------------
+    // INVADER_3 — REWORKED 2026-08-09. Adds the U22-A/B FM warble.
+    //
+    // U17 555 (R51=10k, R52=68k, C7=0.1u; 98.8 Hz nominal, 104.9 at
+    // V=7.57) with CV swept by U22-A/B (R24=2.2M relaxation osc) through
+    // C12/R54 — a real FM warble the old static-square model lacked.
+    // Measured: cluster spacing ~8.7 Hz normal / ~5.05 Hz warp (LFO rate);
+    // center 108.5 / 100.1 Hz (direct warp path NET_C(W, U30.9) retunes
+    // both). Deviation +/-8% of center fits the measured cluster width —
+    // this (INV3_PER_DEV) is the one tunable.
+    // Reference render: astrob_invader3.wav (normal, then warp).
+    //------------------------------------------------------------------------
+    localparam [20:0] INV3_TRI_HALF_N = 21'd888993;   // clk/(2*8.7Hz)
+    localparam [20:0] INV3_TRI_HALF_W = 21'd1531533;  // clk/(2*5.05Hz)
+    localparam [16:0] INV3_PER_CTR_N  = 17'd71284;    // clk/(2*108.5Hz)
+    localparam [16:0] INV3_PER_CTR_W  = 17'd77265;    // clk/(2*100.1Hz)
+    localparam [16:0] INV3_PER_DEV    = 17'd5700;     // ~8% of center  #unverified
+
+    wire [20:0] inv3_tri_half = warp_active ? INV3_TRI_HALF_W : INV3_TRI_HALF_N;
+    wire [20:0] inv3_lfo_step = inv3_tri_half >> 8;   // 256 steps per half-cycle
+
+    // triangle LFO (up/down 8-bit)
+    reg [20:0] inv3_lfo_pre;
+    reg  [7:0] inv3_lfo;
+    reg        inv3_lfo_dir;
+    always @(posedge clk_sys or posedge reset) begin
+        // Async-reset branch must test ONLY `reset` (Quartus 17.0 error 10200).
+        // FREE-RUN FIX 2026-08-09: U22-A/B free-runs on the board (see INV1).
+        if (reset) begin
+            inv3_lfo <= 8'd128;  inv3_lfo_dir <= 1'b0;  inv3_lfo_pre <= 21'd0;
+        end else if (inv3_lfo_pre >= inv3_lfo_step) begin
+            inv3_lfo_pre <= 21'd0;
+            if (inv3_lfo_dir) begin
+                if (inv3_lfo == 8'd0)   inv3_lfo_dir <= 1'b0;
+                else                    inv3_lfo <= inv3_lfo - 8'd1;
+            end else begin
+                if (inv3_lfo == 8'd255) inv3_lfo_dir <= 1'b1;
+                else                    inv3_lfo <= inv3_lfo + 8'd1;
+            end
+        end else begin
+            inv3_lfo_pre <= inv3_lfo_pre + 21'd1;
+        end
+    end
+
+    // V-STEP 2026-08-09: center from staircase ROM (constants above = step 0).
+    wire [16:0] inv3_per_ctr = warp_active ? rom_i3w : rom_i3n;
+    // half = center + dev*(lfo-128)/128
+    wire signed [17:0] inv3_lfo_c = $signed({10'd0, inv3_lfo}) - 18'sd128;
+    wire signed [35:0] inv3_dev_p = $signed({19'd0, INV3_PER_DEV}) * inv3_lfo_c;
+    wire signed [17:0] inv3_dev   = inv3_dev_p[24:7];   // >>7
+    wire [16:0] inv3_half = inv3_per_ctr + inv3_dev[16:0];
+
+    reg [16:0] inv3_osc_cnt;
+    reg        inv3_osc_out;
+    always @(posedge clk_sys or posedge reset) begin
+        // Async-reset branch must test ONLY `reset` (Quartus 17.0 error 10200).
+        if (reset) begin
+            inv3_osc_cnt <= 17'd0;
+            inv3_osc_out <= 1'b0;
+        end else if (!inv3_gate) begin
+            inv3_osc_cnt <= 17'd0;
+            inv3_osc_out <= 1'b0;
+        end else if (inv3_osc_cnt == 17'd0) begin
+            inv3_osc_cnt <= inv3_half;
+            inv3_osc_out <= ~inv3_osc_out;
+        end else begin
+            inv3_osc_cnt <= inv3_osc_cnt - 17'd1;
+        end
+    end
+
+    wire signed [15:0] inv3_out = inv3_gate ? (inv3_osc_out ? VOICE_FS : -VOICE_FS) : 16'sd0;
+
+    //------------------------------------------------------------------------
+    // INVADER_4 — REWORKED 2026-08-09. "Known gap" (warble) closed.
+    //
+    // U37 555 free-runs at 68.7 Hz (R89=10k, R90=100k, C39=0.1u; never
+    // gated — U37.4 tied to +12V) clocking U28 CD4024, which SELF-RESETS
+    // from its own output (U28 pin 2 <- pin 5). Q1..Q4 through R31/R32/
+    // R33/R30 (10k/22k/39k/82k) into U38's CV pin: a binary staircase
+    // sweeping U38 (R60=10k, R61=100k, C23=0.01u; 687 Hz base). Result:
+    // 16-step frequency ramp ~682 -> ~890 Hz. This is why earlier spot
+    // measurements disagreed (730 vs 748 vs 771 Hz): all were samples of
+    // the sweep at different phases.
+    //
+    // OPEN QUESTION (self-reset semantics): pin2<-pin5 reset fires when
+    // Q5 RISES, i.e. at count 16 -> mod-16, one ramp per cycle, sweep
+    // rate 68.7/16 ~= 4.3 Hz. If instead the intended behavior is mod-32
+    // (two ramps), rate is ~2.15 Hz. The old comment said "mod-5 ring"
+    // which is neither. Modeled as mod-16 here (ring[3:0], wrap = reset);
+    // if the board's sweep audibly repeats at ~2 Hz instead of ~4 Hz,
+    // change inv4_ring to [4:0] and keep code = ring[3:0].
+    // Reference render: astrob_invader4.wav.
+    //------------------------------------------------------------------------
+    localparam [17:0] INV4_STEP_HALF = 18'd112580;    // clk/(2*68.7Hz), U37
+
+    //--------------------------------------------------------------------
+    // INV4 CV MODEL REPLACED 2026-08-11 -- netlist adjudicated the open
+    // questions in this block's header, and the old model lost:
+    //
+    //  1) TAP ORDER (was the "F-1" finding): nl_astrob.cpp lines
+    //     1123-1126 put the HEAVIEST resistor weight on Q1, the FASTEST
+    //     tap (Q1->R31 10k, Q2->R32 22k, Q3->R33 39k, Q4->R30 82k) --
+    //     mirror-image of INV2. The CV is therefore NOT a smooth 16-step
+    //     ramp: it is dominated by a +/-2.0V alternation at fosc/2
+    //     (~34.4 Hz) with the slower bits contributing 0.9/0.5/0.25V.
+    //  2) R34 4.7k couples node V DIRECTLY into the same node (netlist
+    //     line 1127/1119) -- the strongest single conductance there. The
+    //     old model had no V path into the CV at all (V only reached the
+    //     endpoints table).
+    //  3) Pin-5 divider as per the staircase ROM note.
+    //
+    // Result: per 16-count cycle the tone ZIGZAGS between ~596 and
+    // ~900 Hz (at step 0), repeating at 68.7/16 = 4.29 Hz. The old
+    // scattered spot measurements this block used to explain away
+    // (730 / 748 / 771 Hz) sit right on the new table's interior values
+    // (716 / 737 / 764 / 784) -- they were samples of the zigzag.
+    //
+    // The self-reset model is UNCHANGED: netlist line 1122 (U28.2 <-
+    // U28.5 = Q5) confirms mod-16, closing that block-header question.
+    //
+    // ROM is half-periods, netlist-absolute (the old 682/890 endpoints
+    // were an interpretation of ambiguous data, so there is no capture
+    // anchor to preserve) -- flag for ear check against real hardware.
+    //--------------------------------------------------------------------
+
+    reg [17:0] inv4_stp_cnt;
+    reg        inv4_stp_out;
+    always @(posedge clk_sys or posedge reset) begin  // U37: free-runs, ungated
+        if (reset) begin
+            inv4_stp_cnt <= INV4_STEP_HALF;
+            inv4_stp_out <= 1'b0;
+        end else if (inv4_stp_cnt == 18'd0) begin
+            inv4_stp_cnt <= INV4_STEP_HALF;
+            inv4_stp_out <= ~inv4_stp_out;
+        end else begin
+            inv4_stp_cnt <= inv4_stp_cnt - 18'd1;
+        end
+    end
+
+    reg inv4_stp_d;
+    always @(posedge clk_sys or posedge reset) begin
+        if (reset) inv4_stp_d <= 1'b0;
+        else       inv4_stp_d <= inv4_stp_out;
+    end
+    wire inv4_stp_rise = inv4_stp_out & ~inv4_stp_d;
+
+    reg [3:0] inv4_ring;                              // U28 mod-16 (see note)
+    always @(posedge clk_sys or posedge reset) begin
+        if (reset)              inv4_ring <= 4'd0;
+        else if (inv4_stp_rise) inv4_ring <= inv4_ring + 4'd1;  // wrap = self-reset
+    end
+    wire [3:0] inv4_code = inv4_ring;
+
+    // 10-step x 16-code half-period ROM (see header above). Packed row per
+    // vstep, sliced by the ring code.
+    reg [271:0] i4row;   // 16 x 17-bit
+    always @* begin
+        case (vstep)
+        4'd0: i4row = {17'd12982, 17'd10119, 17'd11483, 17'd9221, 17'd12086, 17'd9591, 17'd10795, 17'd8784, 17'd12537, 17'd9861, 17'd11144, 17'd9008, 17'd11707, 17'd9360, 17'd10498, 17'd8591};
+        4'd1: i4row = {17'd12800, 17'd10014, 17'd11345, 17'd9135, 17'd11931, 17'd9497, 17'd10674, 17'd8706, 17'd12369, 17'd9761, 17'd11015, 17'd8925, 17'd11563, 17'd9271, 17'd10385, 17'd8517};
+        4'd2: i4row = {17'd12620, 17'd9909, 17'd11208, 17'd9048, 17'd11778, 17'd9403, 17'd10554, 17'd8628, 17'd12203, 17'd9662, 17'd10886, 17'd8843, 17'd11420, 17'd9181, 17'd10271, 17'd8442};
+        4'd3: i4row = {17'd12543, 17'd9864, 17'd11149, 17'd9011, 17'd11712, 17'd9363, 17'd10502, 17'd8594, 17'd12132, 17'd9619, 17'd10831, 17'd8807, 17'd11358, 17'd9143, 17'd10223, 17'd8409};
+        4'd4: i4row = {17'd12394, 17'd9776, 17'd11034, 17'd8938, 17'd11584, 17'd9284, 17'd10402, 17'd8528, 17'd11994, 17'd9535, 17'd10723, 17'd8738, 17'd11239, 17'd9068, 17'd10127, 17'd8346};
+        4'd5: i4row = {17'd12209, 17'd9665, 17'd10891, 17'd8846, 17'd11425, 17'd9185, 17'd10276, 17'd8445, 17'd11822, 17'd9430, 17'd10589, 17'd8650, 17'd11090, 17'd8973, 17'd10008, 17'd8266};
+        4'd6: i4row = {17'd12019, 17'd9550, 17'd10743, 17'd8751, 17'd11261, 17'd9081, 17'd10145, 17'd8358, 17'd11644, 17'd9321, 17'd10449, 17'd8559, 17'd10936, 17'd8875, 17'd9885, 17'd8183};
+        4'd7: i4row = {17'd11755, 17'd9389, 17'd10536, 17'd8616, 17'd11032, 17'd8936, 17'd9962, 17'd8235, 17'd11398, 17'd9168, 17'd10254, 17'd8431, 17'd10721, 17'd8736, 17'd9712, 17'd8066};
+        4'd8: i4row = {17'd11581, 17'd9282, 17'd10399, 17'd8526, 17'd10880, 17'd8839, 17'd9840, 17'd8153, 17'd11236, 17'd9066, 17'd10125, 17'd8344, 17'd10579, 17'd8644, 17'd9596, 17'd7987};
+        default: i4row = {17'd11443, 17'd9196, 17'd10290, 17'd8454, 17'd10760, 17'd8762, 17'd9743, 17'd8087, 17'd11107, 17'd8984, 17'd10022, 17'd8275, 17'd10465, 17'd8570, 17'd9504, 17'd7924};
+        endcase
+    end
+    wire [16:0] inv4_half = i4row[inv4_code*17 +: 17];
+    // No warp variant: hardware behaviour for INV4 under warp is
+    // unconfirmed (no isolated capture), and the resolved warp rule
+    // (see V GENERATOR block) gives no derivable shift to apply.
+
+    reg [16:0] inv4_osc_cnt;
+    reg        inv4_osc_out;
+    always @(posedge clk_sys or posedge reset) begin
+        // Async-reset branch must test ONLY `reset` (Quartus 17.0 error 10200).
+        if (reset) begin
+            inv4_osc_cnt <= 17'd0;
+            inv4_osc_out <= 1'b0;
+        end else if (!inv4_gate) begin
+            inv4_osc_cnt <= 17'd0;
+            inv4_osc_out <= 1'b0;
+        end else if (inv4_osc_cnt == 17'd0) begin
+            inv4_osc_cnt <= inv4_half;
+            inv4_osc_out <= ~inv4_osc_out;
+        end else begin
+            inv4_osc_cnt <= inv4_osc_cnt - 17'd1;
+        end
+    end
+
+    wire signed [15:0] inv4_out = inv4_gate ? (inv4_osc_out ? VOICE_FS : -VOICE_FS) : 16'sd0;
+
+
+    //========================================================================
+    // NEW VOICES 2026-08-12 — LASER_1, LASER_2, SHORT/LONG EXPLOSIONS,
+    // ASTEROIDS, REFILL. All derived from nl_astrob.cpp (netlist line refs
+    // below); no board captures exist for these yet, so absolute levels and
+    // filter corners are netlist-nominal — flag all five for ear check.
+    //========================================================================
+
+    //------------------------------------------------------------------------
+    // Shared DSP infrastructure.
+    // tick = clk/256 = 60.42 kHz: update rate for envelopes, noise, filters.
+    // The 555 VCOs and tone counters stay at full clk for pitch accuracy.
+    //------------------------------------------------------------------------
+    reg [7:0] tick_cnt;
+    reg       tick;
+    always @(posedge clk_sys or posedge reset) begin
+        if (reset) begin tick_cnt <= 8'd0; tick <= 1'b0; end
+        else begin tick_cnt <= tick_cnt + 8'd1; tick <= (tick_cnt == 8'd0); end
+    end
+
+    // MM5837 (U8): 17-bit LFSR, taps 17 & 14. One clock per tick = 60.4 kHz,
+    // inside the part's real 48-112 kHz spread (MAME underclocks to 12 kHz
+    // for speed; we don't need to). ONE instance feeds BOTH explosions and
+    // asteroids (netlist: C72 couples U8.3 onto Q6.G *and* Q5.G), so the two
+    // noise voices are correlated when simultaneous — deliberate, board-true.
+    reg [16:0] lfsr;
+    // Lockup guard (2026-08-12e): a XOR LFSR has an absorbing all-zero
+    // state. If reset never pulses (unclocked power-up, cold FPGA config
+    // with an idle reset line), registers init to zero and BOTH noise
+    // voices die permanently -- the symptom is the envelope appearing as
+    // a DC pulse ("speaker pinned to the rail"). The OR term shifts a 1
+    // in whenever the state is zero: self-starting from any state.
+    wire lfsr_zero = (lfsr == 17'd0);
+    always @(posedge clk_sys or posedge reset) begin
+        if (reset) lfsr <= 17'h1;
+        else if (tick) lfsr <= {lfsr[15:0], (lfsr[16] ^ lfsr[13]) | lfsr_zero};
+    end
+    wire noise_bit = lfsr[16];
+
+    //------------------------------------------------------------------------
+    // EXPLOSIONS (SND-003 / SND-007). Netlist lines 953-1010.
+    //
+    // Two CD4011 half-monostables share ONE storage cap (C80 4.7u) and one
+    // noise VCA (Q6 2N4093, gates driven by the MM5837 through C72):
+    //   SHORT ($3F bit2): R185 1M x C81 .05u -> ~35 ms pulse, charge via
+    //     R184 4.7k + D31/D30 -> fast attack (tau ~22 ms)
+    //   LONG  ($3F bit3): R170 2.2M x C82 .1u -> ~152 ms pulse, charge via
+    //     R183 10k -> slower attack (tau ~47 ms)
+    // Decay: C80 into R180/R181 47k paths, tau ~150 ms, exponential.
+    // Then U16 2-pole LPF: R177/R176 47k, C78 .1u fb, C76+C77 .0267u shunt
+    // -> f0 = 65.6 Hz, Q = 0.97 (Chamberlin SVF below, coeffs at 60.4 kHz).
+    // D27/D28 clamp the filter node -> modelled as the output saturation.
+    //------------------------------------------------------------------------
+    wire       sexpl_bit = latch_3f[2];    // active low
+    wire       lexpl_bit = latch_3f[3];
+    reg        sexpl_d, lexpl_d;
+    always @(posedge clk_sys) begin sexpl_d <= sexpl_bit; lexpl_d <= lexpl_bit; end
+    wire sexpl_trig = sexpl_d & ~sexpl_bit;   // falling edge = trigger
+    wire lexpl_trig = lexpl_d & ~lexpl_bit;
+
+    localparam [13:0] SEXPL_TICKS = 14'd2097;   // 34.7 ms  (R185*C81*ln2)
+    localparam [13:0] LEXPL_TICKS = 14'd9184;   // 152 ms   (R170*C82*ln2)
+    reg [13:0] sp_cnt, lp_cnt;
+    always @(posedge clk_sys or posedge reset) begin
+        if (reset) begin sp_cnt <= 14'd0; lp_cnt <= 14'd0; end
+        else begin
+            if (sexpl_trig)            sp_cnt <= SEXPL_TICKS;
+            else if (tick && sp_cnt!=0) sp_cnt <= sp_cnt - 14'd1;
+            if (lexpl_trig)            lp_cnt <= LEXPL_TICKS;
+            else if (tick && lp_cnt!=0) lp_cnt <= lp_cnt - 14'd1;
+        end
+    end
+
+    localparam [16:0] ENV_MAX = 17'd61440;
+    reg [16:0] expl_env;
+    always @(posedge clk_sys or posedge reset) begin
+        if (reset) expl_env <= 17'd0;
+        else if (tick) begin
+            if (sp_cnt != 0)        expl_env <= expl_env + ((ENV_MAX - expl_env) >> 10);
+            else if (lp_cnt != 0)   expl_env <= expl_env + ((ENV_MAX - expl_env) >> 11);
+            // -1 floor: pure >>13 decay STICKS at 8191 once the shift
+            // rounds to zero (a permanent -12 dB rumble, found in sim)
+            else if (expl_env != 0) expl_env <= expl_env - (expl_env >> 13) - 17'd1;
+        end
+    end
+
+    // Chamberlin SVF, f0 65.6 Hz Q 0.97 at 60.42 kHz
+    localparam signed [15:0] EXPL_F    = 16'sd447;     // Q16
+    localparam signed [15:0] EXPL_DAMP = 16'sd16943;   // Q14 (1/Q)
+    // NB: every product below gets an explicit 40-bit wire before shifting.
+    // A 24x16 multiply evaluated in a 24-bit expression context TRUNCATES
+    // and wraps (the same trap the INV1 block documents) — the first build
+    // of this filter railed to DC exactly that way.
+    reg  signed [23:0] expl_lp, expl_bp;
+    wire signed [17:0] expl_x   = noise_bit ? $signed({1'b0, expl_env}) : -$signed({1'b0, expl_env});
+    wire signed [39:0] expl_bpD = expl_bp * EXPL_DAMP;
+    wire signed [23:0] expl_hp  = {{6{expl_x[17]}}, expl_x} - expl_lp - expl_bpD[37:14];
+    wire signed [39:0] expl_bpF = expl_bp * EXPL_F;
+    wire signed [39:0] expl_hpF = expl_hp * EXPL_F;
+    always @(posedge clk_sys or posedge reset) begin
+        if (reset) begin expl_lp <= 24'sd0; expl_bp <= 24'sd0; end
+        else if (tick) begin
+            // zero states while silent: the truncated products otherwise
+            // sustain a fixed-point limit cycle (~150 LSB orbit, found in sim)
+            if (expl_env == 17'd0) begin expl_lp <= 24'sd0; expl_bp <= 24'sd0; end
+            else begin
+                expl_lp <= expl_lp + expl_bpF[39:16];
+                expl_bp <= expl_bp + expl_hpF[39:16];
+            end
+        end
+    end
+    // gain + D27/D28 clamp; EXPL_GAIN_LOG2 tuned in sim so a full one-shot
+    // peaks near VOICE_FS
+    localparam EXPL_GAIN_LOG2 = 2;
+    wire signed [23:0] expl_amp = expl_lp <<< EXPL_GAIN_LOG2;
+    wire signed [15:0] expl_out =
+        (expl_amp >  24'sd6000) ?  16'sd6000 :
+        (expl_amp < -24'sd6000) ? -16'sd6000 : expl_amp[15:0];
+
+    //------------------------------------------------------------------------
+    // ASTEROIDS (SND-003). Netlist lines 1014-1029.
+    //
+    // Level-gated (no one-shot): I_ASTROIDS ($3E bit4, active low) drives the
+    // Q5 noise VCA directly through R174/R175 -> continuous rumble while
+    // held. MFB LPF R172/R150 33k, C70 .1u, C71 .022u -> f0 102.8 Hz,
+    // Q 1.07; then R136 1k / C59 .33u pole at 482 Hz; out via C60.
+    // Fast env slew (>>6, ~1 ms) stands in for the un-capacitored gate to
+    // avoid a hard click that the board's AC coupling would soften.
+    //------------------------------------------------------------------------
+    wire astro_gate = ~latch_3e[4];
+    reg [16:0] astro_env;
+    always @(posedge clk_sys or posedge reset) begin
+        if (reset) astro_env <= 17'd0;
+        else if (tick) begin
+            if (astro_gate) astro_env <= astro_env + ((ENV_MAX - astro_env) >> 6);
+            else if (astro_env != 0) astro_env <= astro_env - (astro_env >> 6) - 17'd1;
+        end
+    end
+
+    localparam signed [15:0] ASTRO_F    = 16'sd701;     // Q16, f0 102.8 Hz
+    localparam signed [15:0] ASTRO_DAMP = 16'sd15312;   // Q14, 1/1.07
+    localparam signed [15:0] ASTRO_P482 = 16'sd1602;    // Q15 one-pole alpha
+    reg  signed [23:0] astro_lp, astro_bp, astro_p1;
+    wire signed [17:0] astro_x   = noise_bit ? $signed({1'b0, astro_env}) : -$signed({1'b0, astro_env});
+    wire signed [39:0] astro_bpD = astro_bp * ASTRO_DAMP;
+    wire signed [23:0] astro_hp  = {{6{astro_x[17]}}, astro_x} - astro_lp - astro_bpD[37:14];
+    wire signed [39:0] astro_bpF = astro_bp * ASTRO_F;
+    wire signed [39:0] astro_hpF = astro_hp * ASTRO_F;
+    wire signed [24:0] astro_pd  = astro_lp - astro_p1;
+    wire signed [40:0] astro_pdP = astro_pd * ASTRO_P482;
+    always @(posedge clk_sys or posedge reset) begin
+        if (reset) begin astro_lp <= 24'sd0; astro_bp <= 24'sd0; astro_p1 <= 24'sd0; end
+        else if (tick) begin
+            if (astro_env == 17'd0) begin
+                astro_lp <= 24'sd0; astro_bp <= 24'sd0; astro_p1 <= 24'sd0;
+            end else begin
+                astro_lp <= astro_lp + astro_bpF[39:16];
+                astro_bp <= astro_bp + astro_hpF[39:16];
+                astro_p1 <= astro_p1 + astro_pdP[38:15];
+            end
+        end
+    end
+    localparam ASTRO_GAIN_LOG2 = 2;
+    wire signed [23:0] astro_amp = astro_p1 <<< ASTRO_GAIN_LOG2;
+    wire signed [15:0] astro_out =
+        (astro_amp >  24'sd6000) ?  16'sd6000 :
+        (astro_amp < -24'sd6000) ? -16'sd6000 : astro_amp[15:0];
+
+    //------------------------------------------------------------------------
+    // LASER_1 / LASER_2 ($3F bits 0/1). Netlist lines 752-853.
+    //
+    // Per laser: CD4011 half-monostable (2.2M x 0.1u -> 152 ms pulse) gates
+    // a swept VCO into a CD4024; five taps -- Q1,Q2,Q3,Q4,Q6, Q5 SKIPPED --
+    // sum through 82k/39k/22k/10k/10k (SND-002's laser note).
+    // Sweep: while the pulse is live, C57/C53 (0.1u) charges toward 12 V
+    // through R134/R106 2.7M + R107/R133 100k (tau 280 ms); at pulse end
+    // D11/D12 dump it back to ~0.6 V. Q10/Q9 (PNP follower, +0.65 V, capped
+    // ~8 V by the parked 555's pin-5 divider) turn that into the VCO CV.
+    // VCO half-period = MAME's calibrated HLE quintic (VARCLOCK, netlist
+    // lines 779/831), baked into a 64-entry ROM indexed by C57 voltage in
+    // 1/8 V steps. Audible sweep: VCO ~350k->13.5k Hz (L1) / ~500k->29k Hz
+    // (L2) over the shot -- the tap mix starts as bright hiss and falls to
+    // ~0.8 / ~1.8 kHz fundamentals. Retrigger restarts the pulse but NOT the
+    // sweep cap (board-true: D11 only dumps at pulse END).
+    //------------------------------------------------------------------------
+    localparam [13:0] LASER_TICKS = 14'd9184;    // 152 ms
+    localparam [15:0] VC_RESET    = 16'd2458;    // 0.6 V in Q12
+    localparam [15:0] VC_TARGET   = 16'd49152;   // 12.0 V in Q12
+
+    // tap weights: conductances of 82k/39k/22k/10k/10k scaled to sum VOICE_FS
+    localparam signed [15:0] LW_Q1 = 16'sd258;
+    localparam signed [15:0] LW_Q2 = 16'sd543;
+    localparam signed [15:0] LW_Q3 = 16'sd962;
+    localparam signed [15:0] LW_Q4 = 16'sd2119;
+    localparam signed [15:0] LW_Q6 = 16'sd2118;   // sum = 6000
+
+    // 64 x 21-bit half-periods (constants)
+    localparam [1343:0] L1ROM = {21'd740, 21'd757, 21'd757, 21'd757, 21'd757, 21'd757, 21'd757, 21'd757,
+              21'd631, 21'd643, 21'd655, 21'd667, 21'd680, 21'd694, 21'd708, 21'd723,
+              21'd545, 21'd555, 21'd566, 21'd577, 21'd587, 21'd598, 21'd609, 21'd620,
+              21'd471, 21'd479, 21'd487, 21'd496, 21'd506, 21'd515, 21'd525, 21'd535,
+              21'd418, 21'd423, 21'd429, 21'd435, 21'd441, 21'd448, 21'd455, 21'd463,
+              21'd363, 21'd373, 21'd381, 21'd388, 21'd395, 21'd401, 21'd407, 21'd412,
+              21'd198, 21'd232, 21'd261, 21'd285, 21'd306, 21'd324, 21'd339, 21'd352,
+              21'd15, 21'd15, 21'd15, 21'd15, 21'd15, 21'd63, 21'd114, 21'd159};
+    localparam [1343:0] L2ROM = {21'd346, 21'd353, 21'd353, 21'd353, 21'd353, 21'd353, 21'd353, 21'd353,
+              21'd297, 21'd302, 21'd308, 21'd313, 21'd319, 21'd325, 21'd332, 21'd339,
+              21'd256, 21'd261, 21'd266, 21'd271, 21'd276, 21'd281, 21'd286, 21'd292,
+              21'd221, 21'd225, 21'd229, 21'd233, 21'd237, 21'd242, 21'd246, 21'd251,
+              21'd196, 21'd198, 21'd201, 21'd204, 21'd207, 21'd210, 21'd213, 21'd217,
+              21'd170, 21'd174, 21'd178, 21'd182, 21'd185, 21'd188, 21'd190, 21'd193,
+              21'd92, 21'd107, 21'd121, 21'd133, 21'd143, 21'd151, 21'd158, 21'd164,
+              21'd15, 21'd15, 21'd15, 21'd15, 21'd15, 21'd28, 21'd52, 21'd73};
+
+    // ---- laser 1 ----
+    reg        l1_bit_d;
+    always @(posedge clk_sys) l1_bit_d <= latch_3f[0];
+    wire l1_trig = l1_bit_d & ~latch_3f[0];
+
+    reg [13:0] l1_cnt;
+    reg [15:0] l1_vc;
+    wire       l1_act = (l1_cnt != 14'd0);
+    always @(posedge clk_sys or posedge reset) begin
+        if (reset) begin l1_cnt <= 14'd0; l1_vc <= VC_RESET; end
+        else begin
+            if (l1_trig) l1_cnt <= LASER_TICKS;
+            else if (tick && l1_act) begin
+                l1_cnt <= l1_cnt - 14'd1;
+                l1_vc  <= l1_vc + ((VC_TARGET - l1_vc) >> 14);
+                if (l1_cnt == 14'd1) l1_vc <= VC_RESET;   // D11 dump at pulse end
+            end
+        end
+    end
+    wire [5:0]  l1_idx  = (l1_vc[15:9] > 7'd63) ? 6'd63 : l1_vc[14:9];
+    wire [20:0] l1_half = L1ROM[l1_idx*21 +: 21];
+
+    reg [20:0] l1_osc_cnt;
+    reg        l1_osc;
+    reg [5:0]  l1_div;
+    always @(posedge clk_sys or posedge reset) begin
+        if (reset) begin l1_osc_cnt <= 21'd0; l1_osc <= 1'b0; l1_div <= 6'd0; end
+        else if (!l1_act) begin l1_osc_cnt <= 21'd0; l1_osc <= 1'b0; l1_div <= 6'd0; end
+        else if (l1_osc_cnt == 21'd0) begin
+            l1_osc_cnt <= l1_half;
+            l1_osc     <= ~l1_osc;
+            if (!l1_osc) l1_div <= l1_div + 6'd1;    // count rising edges
+        end else l1_osc_cnt <= l1_osc_cnt - 21'd1;
+    end
+
+    wire signed [15:0] l1_sum =
+        (l1_div[0] ? LW_Q1 : -LW_Q1) + (l1_div[1] ? LW_Q2 : -LW_Q2) +
+        (l1_div[2] ? LW_Q3 : -LW_Q3) + (l1_div[3] ? LW_Q4 : -LW_Q4) +
+        (l1_div[5] ? LW_Q6 : -LW_Q6);                 // Q5 (bit 4) skipped
+    wire signed [15:0] laser1_out = l1_act ? l1_sum : 16'sd0;
+
+    // ---- laser 2 ----
+    reg        l2_bit_d;
+    always @(posedge clk_sys) l2_bit_d <= latch_3f[1];
+    wire l2_trig = l2_bit_d & ~latch_3f[1];
+
+    reg [13:0] l2_cnt;
+    reg [15:0] l2_vc;
+    wire       l2_act = (l2_cnt != 14'd0);
+    always @(posedge clk_sys or posedge reset) begin
+        if (reset) begin l2_cnt <= 14'd0; l2_vc <= VC_RESET; end
+        else begin
+            if (l2_trig) l2_cnt <= LASER_TICKS;
+            else if (tick && l2_act) begin
+                l2_cnt <= l2_cnt - 14'd1;
+                l2_vc  <= l2_vc + ((VC_TARGET - l2_vc) >> 14);
+                if (l2_cnt == 14'd1) l2_vc <= VC_RESET;
+            end
+        end
+    end
+    wire [5:0]  l2_idx  = (l2_vc[15:9] > 7'd63) ? 6'd63 : l2_vc[14:9];
+    wire [20:0] l2_half = L2ROM[l2_idx*21 +: 21];
+
+    reg [20:0] l2_osc_cnt;
+    reg        l2_osc;
+    reg [5:0]  l2_div;
+    always @(posedge clk_sys or posedge reset) begin
+        if (reset) begin l2_osc_cnt <= 21'd0; l2_osc <= 1'b0; l2_div <= 6'd0; end
+        else if (!l2_act) begin l2_osc_cnt <= 21'd0; l2_osc <= 1'b0; l2_div <= 6'd0; end
+        else if (l2_osc_cnt == 21'd0) begin
+            l2_osc_cnt <= l2_half;
+            l2_osc     <= ~l2_osc;
+            if (!l2_osc) l2_div <= l2_div + 6'd1;
+        end else l2_osc_cnt <= l2_osc_cnt - 21'd1;
+    end
+
+    wire signed [15:0] l2_sum =
+        (l2_div[0] ? LW_Q1 : -LW_Q1) + (l2_div[1] ? LW_Q2 : -LW_Q2) +
+        (l2_div[2] ? LW_Q3 : -LW_Q3) + (l2_div[3] ? LW_Q4 : -LW_Q4) +
+        (l2_div[5] ? LW_Q6 : -LW_Q6);
+    wire signed [15:0] laser2_out = l2_act ? l2_sum : 16'sd0;
+
+    //------------------------------------------------------------------------
+    // REFILL ($3E bit 6). Netlist lines 856-903. Resolves the backlog's
+    // open question #1: the CD4017 ladder feeds R16 10k into Q7 (2N4403
+    // emitter follower), whose emitter drives BOTH 555s' CV pins (U5.5 and
+    // U4.5 tied). CV = ladder + 0.65 V: 6.54 V (Q0) falling to 4.55 V (Q9)
+    // -- and since lower CV = faster 555, the warble RISES in pitch over
+    // the run (the backlog's "descending" guess was wrong).
+    //
+    // The two 555s do not beat -- they ALTERNATE: OSC2 (15.307 Hz, MAME
+    // hard clock) drives U4's reset directly and U5's through a NAND
+    // inverter, so exactly one runs per half-cycle. U5: 455->559 Hz;
+    // U4: 376->461 Hz. Step clock OSC1 = 2.664 Hz (MAME hard clock),
+    // counter wraps 0..9 while the latch bit holds it live. Idle: /REFILL
+    // (7406 OC) shunts the mix node -> silent, counter reset. Output node
+    // swings 0..6 V (two equal 470k into C49) -> +/-VOICE_FS/2 after
+    // coupling.
+    //------------------------------------------------------------------------
+    wire refill_gate = ~latch_3e[6];
+
+    localparam [21:0] RFL_STEP_HALF = 22'd2903243;   // 2.664 Hz
+    localparam [19:0] RFL_ALT_HALF  = 20'd505275;    // 15.307 Hz
+
+    reg [21:0] rfl_sc; reg rfl_sq;
+    reg [3:0]  rfl_step;
+    always @(posedge clk_sys or posedge reset) begin
+        if (reset) begin rfl_sc <= RFL_STEP_HALF; rfl_sq <= 1'b0; rfl_step <= 4'd0; end
+        else if (!refill_gate) begin rfl_sc <= RFL_STEP_HALF; rfl_sq <= 1'b0; rfl_step <= 4'd0; end
+        else if (rfl_sc == 22'd0) begin
+            rfl_sc <= RFL_STEP_HALF;
+            rfl_sq <= ~rfl_sq;
+            if (!rfl_sq) rfl_step <= (rfl_step == 4'd9) ? 4'd0 : rfl_step + 4'd1;
+        end else rfl_sc <= rfl_sc - 22'd1;
+    end
+
+    reg [19:0] rfl_ac; reg rfl_alt;          // free-runs (OSC2 is a free clock)
+    always @(posedge clk_sys or posedge reset) begin
+        if (reset) begin rfl_ac <= RFL_ALT_HALF; rfl_alt <= 1'b0; end
+        else if (rfl_ac == 20'd0) begin rfl_ac <= RFL_ALT_HALF; rfl_alt <= ~rfl_alt; end
+        else rfl_ac <= rfl_ac - 20'd1;
+    end
+
+    reg [14:0] rfl_u5rom, rfl_u4rom;
+    always @* begin
+        case (rfl_step)
+        4'd0: begin rfl_u5rom=15'd17008; rfl_u4rom=15'd20567; end
+        4'd1: begin rfl_u5rom=15'd16289; rfl_u4rom=15'd19707; end
+        4'd2: begin rfl_u5rom=15'd15320; rfl_u4rom=15'd18548; end
+        4'd3: begin rfl_u5rom=15'd15045; rfl_u4rom=15'd18219; end
+        4'd4: begin rfl_u5rom=15'd14796; rfl_u4rom=15'd17922; end
+        4'd5: begin rfl_u5rom=15'd14437; rfl_u4rom=15'd17493; end
+        4'd6: begin rfl_u5rom=15'd14190; rfl_u4rom=15'd17198; end
+        4'd7: begin rfl_u5rom=15'd14021; rfl_u4rom=15'd16995; end
+        4'd8: begin rfl_u5rom=15'd13915; rfl_u4rom=15'd16868; end
+        default: begin rfl_u5rom=15'd13840; rfl_u4rom=15'd16779; end
+        endcase
+    end
+
+    reg [14:0] rfl_c5, rfl_c4; reg rfl_s5, rfl_s4;
+    always @(posedge clk_sys or posedge reset) begin
+        if (reset) begin rfl_c5 <= 15'd0; rfl_s5 <= 1'b0; rfl_c4 <= 15'd0; rfl_s4 <= 1'b0; end
+        else begin
+            // U5 runs on OSC2 low; held reset otherwise
+            if (!refill_gate ||  rfl_alt) begin rfl_c5 <= 15'd0; rfl_s5 <= 1'b0; end
+            else if (rfl_c5 == 15'd0) begin rfl_c5 <= rfl_u5rom; rfl_s5 <= ~rfl_s5; end
+            else rfl_c5 <= rfl_c5 - 15'd1;
+            // U4 runs on OSC2 high
+            if (!refill_gate || !rfl_alt) begin rfl_c4 <= 15'd0; rfl_s4 <= 1'b0; end
+            else if (rfl_c4 == 15'd0) begin rfl_c4 <= rfl_u4rom; rfl_s4 <= ~rfl_s4; end
+            else rfl_c4 <= rfl_c4 - 15'd1;
+        end
+    end
+
+    wire signed [15:0] refill_out =
+        !refill_gate ? 16'sd0 :
+        ((rfl_alt ? rfl_s4 : rfl_s5) ? 16'sd3000 : -16'sd3000);
+
+
+    //------------------------------------------------------------------------
+    // SONAR ($3F bit 7). Netlist lines 637-750.  ** MAME-CAPTURE CALIBRATED **
+    //
+    // Four op-amp state-variable oscillators (U1/U2 LM324 pairs, diode
+    // limited -> near-sine, 2nd harmonic measured -39 dB) sum into the
+    // Q2/Q3 differential VCA whose tail current (Q1, shaped by C47 4.7u /
+    // R117 1k attack / R108 100k decay) is the ping envelope. Nominally all
+    // four oscillators sit at the SAME frequency — the sound exists only
+    // because real parts detune them, which is why this voice cannot be
+    // derived from the schematic (MAME injects FRND randomised values).
+    //
+    // Constants below are calibrated against a MAME gameplay capture
+    // (sonar.wav, 2026-08-12): lines 469.15 / 471.63 / 473.56 / 480.93 Hz
+    // at relative levels -12.7 / -0.5 / 0 / -2.0 dB; attack 10-90% ~96 ms;
+    // decay tau 478 ms (nominal R108*C47 = 470 ms — circuit agrees).
+    // *** These encode MAME's random seed, not a real board. A hardware
+    // capture supersedes this block wholesale; keep the envelope, replace
+    // the four increments/weights. ***
+    //------------------------------------------------------------------------
+    reg        sonar_bit_d;
+    always @(posedge clk_sys) sonar_bit_d <= latch_3f[7];
+    wire sonar_trig = sonar_bit_d & ~latch_3f[7];
+
+    // capture-fit pulse (attack completes; nominal one-shot R20*C4 = 34.7 ms
+    // under-runs the measured envelope through the nonlinear Q1 turn-on)
+    localparam [13:0] SONAR_TICKS = 14'd8459;      // 140 ms
+    reg [13:0] sonar_pc;
+    always @(posedge clk_sys or posedge reset) begin
+        if (reset) sonar_pc <= 14'd0;
+        else if (sonar_trig) sonar_pc <= SONAR_TICKS;
+        else if (tick && sonar_pc != 0) sonar_pc <= sonar_pc - 14'd1;
+    end
+
+    // 24-bit envelope accumulator: at 17-bit width the decay multiplier
+    // (x9>>18) quantises to 0-2 LSB and the -1 floor dominates, shortening
+    // the tail (measured tau 386 ms vs the 478 ms target). Seven fractional
+    // bits restore the exponential. Value = top 17 bits.
+    reg [23:0] sonar_env24;
+    wire [16:0] sonar_env   = sonar_env24[23:7];
+    wire [23:0] sonar_d_att = {ENV_MAX,7'd0} - sonar_env24;
+    always @(posedge clk_sys or posedge reset) begin
+        if (reset) sonar_env24 <= 24'd0;
+        else if (tick) begin
+            if (sonar_pc != 0)                       // attack tau 68 ms (x2>>13, capture-fit)
+                sonar_env24 <= sonar_env24 + (({2'b0,sonar_d_att}*2) >> 13);
+            else if (sonar_env24 != 0)               // decay tau 482 ms (x9>>18)
+                sonar_env24 <= sonar_env24 - (({2'b0,sonar_env24}*9) >> 18) - 24'd1;
+        end
+    end
+
+    // four phase accumulators, 24-bit @ 60.42 kHz tick
+    localparam [23:0] SON_INC0 = 24'd130264;   // 469.15 Hz
+    localparam [23:0] SON_INC1 = 24'd130952;   // 471.63 Hz
+    localparam [23:0] SON_INC2 = 24'd131488;   // 473.56 Hz
+    localparam [23:0] SON_INC3 = 24'd133535;   // 480.93 Hz
+    reg [23:0] son_ph0, son_ph1, son_ph2, son_ph3;
+    always @(posedge clk_sys or posedge reset) begin
+        if (reset) begin
+            // staggered reset phases: the board's oscillators free-run, so
+            // by any real trigger their phases are uncorrelated. Coherent
+            // (all-zero) starts make the first beat crest fully constructive
+            // and audibly sharpen early pings.
+            son_ph0 <= 24'h000000; son_ph1 <= 24'h5A0000;
+            son_ph2 <= 24'h9C0000; son_ph3 <= 24'h2E0000;
+        end else if (tick) begin
+            son_ph0 <= son_ph0 + SON_INC0;
+            son_ph1 <= son_ph1 + SON_INC1;
+            son_ph2 <= son_ph2 + SON_INC2;
+            son_ph3 <= son_ph3 + SON_INC3;
+        end
+    end
+
+    // quarter-wave sine LUT, 64 x 12-bit
+    localparam [767:0] SINLUT = {12'd2012, 12'd2021, 12'd2028, 12'd2035, 12'd2039, 12'd2043, 12'd2046, 12'd2047,
+              12'd1901, 12'd1919, 12'd1936, 12'd1951, 12'd1966, 12'd1979, 12'd1992, 12'd2003,
+              12'd1716, 12'd1743, 12'd1769, 12'd1793, 12'd1817, 12'd1840, 12'd1861, 12'd1881,
+              12'd1465, 12'd1500, 12'd1533, 12'd1566, 12'd1598, 12'd1629, 12'd1659, 12'd1688,
+              12'd1158, 12'd1199, 12'd1239, 12'd1279, 12'd1318, 12'd1356, 12'd1393, 12'd1430,
+              12'd807, 12'd852, 12'd898, 12'd943, 12'd987, 12'd1031, 12'd1074, 12'd1116,
+              12'd424, 12'd473, 12'd522, 12'd570, 12'd618, 12'd666, 12'd713, 12'd760,
+              12'd25, 12'd75, 12'd126, 12'd176, 12'd226, 12'd275, 12'd325, 12'd375};
+    function signed [12:0] sine_q;
+        input [23:0] ph;
+        reg   [5:0]  idx;
+        reg   [11:0] mag;
+        begin
+            idx = ph[22] ? ~ph[21:16] : ph[21:16];   // fold quarter
+            mag = SINLUT[idx*12 +: 12];
+            sine_q = ph[23] ? -$signed({1'b0,mag}) : $signed({1'b0,mag});
+        end
+    endfunction
+
+    // capture-derived amplitude weights, sum 6000
+    wire signed [12:0] son_s0 = sine_q(son_ph0);
+    wire signed [12:0] son_s1 = sine_q(son_ph1);
+    wire signed [12:0] son_s2 = sine_q(son_ph2);
+    wire signed [12:0] son_s3 = sine_q(son_ph3);
+    wire signed [26:0] son_mix27 = son_s0*16'sd468 + son_s1*16'sd1907
+                                 + son_s2*16'sd2020 + son_s3*16'sd1605;
+    wire signed [15:0] son_mix = son_mix27 >>> 11;          // +/-6000
+    wire signed [33:0] son_envP = son_mix * $signed({1'b0, sonar_env});
+    // [33:16] slice: with ENV_MAX 61440 and son_mix +/-6000 the peak is
+    // ~5625, so bits [33:32] are pure sign extension. If ENV_MAX or the
+    // sonar weights ever grow, widen this slice or add saturation.
+    wire signed [15:0] sonar_out = son_envP[33:16];         // env Q16
+
+    //------------------------------------------------------------------------
+    // BONUS ($3F bit 6) — the "deedle". Netlist lines 1134-1168, nominal.
+    //
+    // Trigger one-shot (R44 1M x C19 .05u = 34.7 ms) dumps C34 (10u, hung
+    // from +12) through D7/R78 1k; C34 then recovers through R77 330k with
+    // tau = 3.3 s — that recovery IS the envelope, self-gating the output
+    // via the D8 half-wave stage (at rest the swing collapses to zero).
+    // Tone: U6 555 (R74 4.7k / R75 100k / C31 4.7n) ~1500 Hz, with OSC4
+    // (7.19 Hz, MAME hard clock) injecting into the pin-7 node through
+    // R79 150k -> pitch alternates 1501 / 1448 Hz at 7.19 Hz. Peak swing
+    // ~10 V of the 12 V rail -> amplitude scaled to ~5/6 VOICE_FS.
+    // Netlist-nominal (no capture) — flag for ear check.
+    //------------------------------------------------------------------------
+    reg        bonus_bit_d;
+    always @(posedge clk_sys) bonus_bit_d <= latch_3f[6];
+    wire bonus_trig = bonus_bit_d & ~latch_3f[6];
+
+    localparam [11:0] BONUS_TICKS = 12'd2097;      // 34.7 ms one-shot
+    reg [11:0] bonus_pc;
+    always @(posedge clk_sys or posedge reset) begin
+        if (reset) bonus_pc <= 12'd0;
+        else if (bonus_trig) bonus_pc <= BONUS_TICKS;
+        else if (tick && bonus_pc != 0) bonus_pc <= bonus_pc - 12'd1;
+    end
+
+    // 24-bit accumulator: at 17-bit width the x5>>20 decay term is
+    // IDENTICALLY ZERO (61440*5 < 2^20) and the envelope decayed linearly
+    // in ~1 s instead of exponentially in 3.5 s. Value = top 17 bits.
+    reg [23:0] bonus_env24;
+    wire [16:0] bonus_env   = bonus_env24[23:7];
+    wire [23:0] bonus_d_att = {ENV_MAX,7'd0} - bonus_env24;
+    always @(posedge clk_sys or posedge reset) begin
+        if (reset) bonus_env24 <= 24'd0;
+        else if (tick) begin
+            if (bonus_pc != 0)                       // C34 dump, tau ~10 ms
+                bonus_env24 <= bonus_env24 + (bonus_d_att >> 9);
+            else if (bonus_env24 != 0)               // R77*C34 tau 3.47 s (x5>>20)
+                bonus_env24 <= bonus_env24 - (({3'b0,bonus_env24}*5) >> 20) - 24'd1;
+        end
+    end
+
+    // 7.19 Hz chop selecting between the two 555 half-periods
+    localparam [20:0] BON_CHOP_HALF = 21'd1075694;
+    reg [20:0] bon_cc; reg bon_sel;
+    always @(posedge clk_sys or posedge reset) begin
+        if (reset) begin bon_cc <= BON_CHOP_HALF; bon_sel <= 1'b0; end
+        else if (bon_cc == 21'd0) begin bon_cc <= BON_CHOP_HALF; bon_sel <= ~bon_sel; end
+        else bon_cc <= bon_cc - 21'd1;
+    end
+
+    localparam [12:0] BON_HALF_HI = 13'd5154;   // 1501 Hz (OSC4 high)
+    localparam [12:0] BON_HALF_LO = 13'd5340;   // 1448 Hz (OSC4 low)
+    reg [12:0] bon_tc; reg bon_sq;
+    always @(posedge clk_sys or posedge reset) begin
+        if (reset) begin bon_tc <= 13'd0; bon_sq <= 1'b0; end
+        else if (bon_tc == 13'd0) begin
+            bon_tc <= bon_sel ? BON_HALF_HI : BON_HALF_LO;
+            bon_sq <= ~bon_sq;
+        end else bon_tc <= bon_tc - 13'd1;
+    end
+
+    wire signed [24:0] bon_amp25 = $signed({1'b0,bonus_env}) * $signed(8'sd80);
+    wire signed [15:0] bon_amp   = bon_amp25[24:10];   // 61440*80>>10 = 4800 pk
+    wire signed [15:0] bonus_out = bon_sq ? bon_amp : -bon_amp;
+
+
+    //------------------------------------------------------------------------
+    // Mix — REWORKED 2026-08-11 (SND-001). Weighted, not flat.
+    //
+    // U7 sums all eleven voices through DELIBERATELY unequal resistors,
+    // with R144 = 22k as the feedback. The spread is 4.7k .. 1M, i.e. just
+    // under 47 dB. The previous flat sum was only harmless because the four
+    // voices built so far happen to share the same 1M resistor; the moment
+    // EXPLOSIONS (4.7k) or ASTEROIDS (10k) land, a flat sum is wrong by
+    // 40+ dB and the march buries them.
+    //
+    // Weights are Q14 with EXPLOSIONS = unity, computed as (22k/Rin)
+    // normalised to (22k/4.7k). Integer error is under 0.1% on every entry.
+    //
+    //   voice        R        value    rel.gain    Q14    dB vs EXPL
+    //   EXPLOSIONS   R122     4.7k     1.000000  16384      0.0
+    //   ASTEROIDS    R121      10k     0.470000   7700     -6.6
+    //   SONAR        R120     220k     0.021364    350    -33.4
+    //   BONUS        R118     470k     0.010000    164    -40.0
+    //   REFILL       R119     470k     0.010000    164    -40.0
+    //   LASER-1      R102     470k     0.010000    164    -40.0
+    //   LASER-2      R103       1M     0.004700     77    -46.6
+    //   INVADER-1    R98        1M     0.004700     77    -46.6
+    //   INVADER-2    R99        1M     0.004700     77    -46.6
+    //   INVADER-3    R100       1M     0.004700     77    -46.6
+    //   INVADER-4    R101       1M     0.004700     77    -46.6
+    //
+    // Unbuilt voices are wired in at zero so that adding one is a one-line
+    // change and it arrives at the right level immediately. Do NOT rebalance
+    // by editing these weights — they are the board.
+    //
+    // CAVEAT: these are the resistor gains only. They are correct provided
+    // every voice arrives at +/-VOICE_FS representing the same source
+    // amplitude. That holds for the four invaders (all NE555 / CD4024 CMOS
+    // outputs swinging the same rail) and should hold for the lasers. It
+    // does NOT automatically hold for EXPLOSIONS/ASTEROIDS/SONAR, which
+    // reach their summing resistors from op-amp stages at a fraction of a
+    // rail swing. When those land, measure their real Vpp at the summing
+    // resistor and fold the ratio into VOICE_FS for that voice — the
+    // weights below stay as they are.
+    //------------------------------------------------------------------------
+    localparam signed [15:0] MIXW_EXPL   = 16'sd16384;  // R122 4.7k
+    localparam signed [15:0] MIXW_ASTRO  = 16'sd7700;   // R121  10k
+    localparam signed [15:0] MIXW_SONAR  = 16'sd350;    // R120 220k
+    localparam signed [15:0] MIXW_BONUS  = 16'sd164;    // R118 470k
+    localparam signed [15:0] MIXW_REFILL = 16'sd164;    // R119 470k
+    localparam signed [15:0] MIXW_LASER1 = 16'sd164;    // R102 470k
+    localparam signed [15:0] MIXW_LASER2 = 16'sd77;     // R103   1M
+    localparam signed [15:0] MIXW_INV1   = 16'sd77;     // R98    1M
+    localparam signed [15:0] MIXW_INV2   = 16'sd77;     // R99    1M
+    localparam signed [15:0] MIXW_INV3   = 16'sd77;     // R100   1M
+    localparam signed [15:0] MIXW_INV4   = 16'sd77;     // R101   1M
+
+    // All sixteen latch functions are now implemented — no stubs remain.
+
+    //------------------------------------------------------------------------
+    // SOURCE-AMPLITUDE COMPENSATION (MIXE_*) — RESTORED 2026-08-12g.
+    //
+    // MIXW_* are resistor gains ONLY. They are valid only if every voice
+    // arrives at the summing node at the same Vpp, and the board does not work
+    // that way: INVADER_3/4 are 555 pin-3 outputs at a full +12 rail
+    // (nl_astrob.cpp 1191/1131), while EXPLOSIONS/ASTEROIDS/LASER/BONUS/REFILL
+    // arrive through coupling caps (C61.2/C60.2/C52.2/C51.2/C50.2/C49.2) and
+    // SONAR straight off an op-amp (U7.1) — all at a fraction of a rail. The
+    // board's 46.6 dB resistor spread therefore gets double-counted against
+    // voices normalised to a common VOICE_FS, and it is NOT recoverable by
+    // master gain because the loudest voice pins the clamp. R144, the 22k
+    // makeup amp those weights were normalised to, is explicitly NOT emulated
+    // (nl_astrob.cpp:321), so nothing downstream restores the rest.
+    //
+    // MIXE stands in for per-stage Vpp as a 3:1 compression of the dB spread:
+    // MIXE = 16384*(MIXW/16384)^(1/3). Rank order is preserved; spread drops
+    // 46.6 -> 15.5 dB. Levels at audio_out with OUTPUT_GAIN_LOG2 = 1:
+    //
+    //   voice                    MIXW   MIXE   dBFS(was)  dBFS(now)
+    //   EXPLOSIONS              16384  16384      +3.3       -2.7
+    //   ASTEROIDS                7700  12738      -3.2       -4.9
+    //   SONAR                     350   4546     -30.1      -13.8
+    //   BONUS / REFILL / LASER-1  164   3530     -36.7      -16.0
+    //   LASER-2 / INVADER-1..4     77   2743     -43.3      -18.2
+    //
+    // ⛔ 2026-08-12f REMOVED this and reverted the mixer to raw MIXW_* with
+    // OUTPUT_GAIN_LOG2 = 2, on the argument that the equal-Vpp caveat was
+    // "bounded, a few dB per voice". HARDWARE SAYS OTHERWISE (user, 2026-08-21:
+    // the 12f build was inaudible, the 12e build "quite clear"). Effective
+    // level is MIX x 2^OUTPUT_GAIN_LOG2, so 12f moved EXPLOSIONS +6 dB and
+    // ASTEROIDS +1.6 dB while dropping SONAR -16.2, BONUS/REFILL/LASER-1 -20.6
+    // and LASER-2/INVADER-1..4 -25.0 dB. That is not a few dB; it silences
+    // every voice except the two loudest.
+    //
+    // Revert = swap MIXE_ back to MIXW_ below and set OUTPUT_GAIN_LOG2 = 2.
+    //------------------------------------------------------------------------
+    localparam signed [15:0] MIXE_EXPL   = 16'sd16384;
+    localparam signed [15:0] MIXE_ASTRO  = 16'sd12738;
+    localparam signed [15:0] MIXE_SONAR  = 16'sd4546;
+    localparam signed [15:0] MIXE_BONUS  = 16'sd3530;
+    localparam signed [15:0] MIXE_REFILL = 16'sd3530;
+    localparam signed [15:0] MIXE_LASER1 = 16'sd3530;
+    localparam signed [15:0] MIXE_LASER2 = 16'sd2743;
+    localparam signed [15:0] MIXE_INV1   = 16'sd2743;
+    localparam signed [15:0] MIXE_INV2   = 16'sd2743;
+    localparam signed [15:0] MIXE_INV3   = 16'sd2743;
+    localparam signed [15:0] MIXE_INV4   = 16'sd2743;
+
+    wire signed [31:0] mix_acc =
+          expl_out   * MIXE_EXPL
+        + astro_out  * MIXE_ASTRO
+        + sonar_out  * MIXE_SONAR
+        + bonus_out  * MIXE_BONUS
+        + refill_out * MIXE_REFILL
+        + laser1_out * MIXE_LASER1
+        + laser2_out * MIXE_LASER2
+        + inv1_out   * MIXE_INV1
+        + inv2_out   * MIXE_INV2
+        + inv3_out   * MIXE_INV3
+        + inv4_out   * MIXE_INV4;
+
+    // MIX_Q14 = 14 puts a full-scale EXPLOSION at exactly +/-VOICE_FS.
+    // MIX_MAKEUP_LOG2 = 1 (x2, permanent, 2026-08-12): with the loud voices
+    // now implemented, worst realistic peak = explosion 12000 + asteroids
+    // 5640 + everything else < 1000 -> ~18600, inside the clamp with ~1.75x
+    // margin. The old temporary value of 7 (needed when only the -46.6 dB
+    // invaders existed) would clip an explosion 23x over — do not raise
+    // this above 1 while EXPL/ASTRO are in the mix.
+    localparam MIX_Q14          = 14;
+    localparam MIX_MAKEUP_LOG2  = 1;
+
+    // OUTPUT_GAIN_LOG2 (2026-08-12d): master gain AFTER the authentic mix.
+    // The board-true relative levels put the loudest voice (explosion) at
+    // only -8.7 dBFS and the invader march ~35 dB below that -- correct
+    // relative to the board, but on real cabinets the power amp + volume
+    // pot made up the absolute level. Without this, gameplay staples sit
+    // near -43 dBFS and the core sounds silent at normal monitor volume.
+    //   0 = pure headroom-safe (nothing ever clips; very quiet)
+    //   1 = explosions still unclipped (peak 24000)
+    //   2 = DEFAULT: +12 dB; explosion bodies clip ~30% over (they are
+    //       already diode-clamped noise thumps; the extra crunch reads as
+    //       cabinet loudness)
+    //   3 = "operator cranked it": everything +18 dB, explosions flat-top
+    localparam OUTPUT_GAIN_LOG2 = 1;   // 12g: MIXE_* restored, see block above
+
+    // Single shift (adopted from the core-side review, 2026-08-12f):
+    // >>>N then <<<M quantised the output to 2^M steps and cost the quiet
+    // voices two bits of resolution. Identical levels, two more LSBs.
+    // NOTE for integrators: SegaG80.sv halves the astrob+speech sum
+    // (mix_sum[17:1]), so OUTPUT_GAIN_LOG2 = 1 (+6 dB) arrives at the core
+    // output as +3 dB. 12g pairs gain 1 with the MIXE_* weights; the two are
+    // a matched pair -- raising the gain on top of MIXE_* pushes EXPLOSIONS
+    // and the ASTEROIDS bed into the clamp and flattens the
+    // explosion-over-bed margin. If more absolute level is needed, prefer
+    // core/OSD gain over changing this.
+    wire signed [31:0] mix_scaled =
+        mix_acc >>> (MIX_Q14 - MIX_MAKEUP_LOG2 - OUTPUT_GAIN_LOG2);
+
+    wire signed [15:0] voice_sum_clamped =
+        (mix_scaled >  32'sd32767) ?  16'sd32767 :
+        (mix_scaled < -32'sd32768) ? -16'sd32768 :
+                                      mix_scaled[15:0];
+
+    always @(posedge clk_sys or posedge reset) begin
+        if (reset)
+            audio_out <= 16'sd0;
+        else
+            audio_out <= mute ? 16'sd0 : voice_sum_clamped;
+    end
+
+endmodule
