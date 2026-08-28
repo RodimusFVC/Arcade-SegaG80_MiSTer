@@ -58,10 +58,11 @@ module SegaG80_CPU (
     output             video_control_1_o,
     output             video_flip_o,
     output             video_control_3_o,   // background board flip
+    output             video_control_6_o,   // Monster Bash bg palette enable
 
     // Background board registers (ports $B8-$BD)
     output       [9:0] bg_scrollx_o,
-    output       [9:0] bg_scrolly_o,
+    output      [10:0] bg_scrolly_o,
     output             bg_enable_o,
     output       [3:0] bg_char_bank_o,
 
@@ -422,6 +423,16 @@ wire io_3f  = (port_addr == 8'h3F);
 // Reads return 0xFE | bg_detect; $0E/$0F are also the sound-board write
 // ports, which back_port_w treats as no-ops.
 wire so_en    = (game_id == 3'd2);
+
+// Monster Bash i8255 PPI ($0C-$0F) — MAME main_ppi8255_portmap + monsterb().
+//   $0C = port A (TMS3617 music), $0D = port B (SHOT/DIVE triggers),
+//   $0E = port C (uPD7751 command out, BUSY status in), $0F = control.
+// Only the read matters here: upd7751_status_r returns busy<<4, so the
+// undecoded 8'hFF default reads as permanently busy and hangs the game at
+// coin-up. 005 shares this port map but never reads it, which is why only
+// Monster Bash is affected.
+wire mb_en    = (game_id == 3'd1);
+wire io_0c_0f = (port_addr >= 8'h0C) & (port_addr <= 8'h0F);
 wire io_08_0f = (port_addr >= 8'h08) & (port_addr <= 8'h0F);
 
 //----------------------------------------------------------------------------
@@ -437,6 +448,20 @@ segag80_rom prog_rom (
     .cpu_addr    (cpu_addr),
     .cpu_dout    (rom_dout)
 );
+
+// Sindbad Mystery's Z80 is a Sega 315-5028: $0000-$7FFF is encrypted, with
+// separate opcode-fetch and data-read tables. $8000+ is plaintext.
+wire       sindbadm_en = (game_id == 3'd4);
+wire [7:0] rom_dout_dec;
+
+segag80_5028 u_dec5028 (
+    .src  (rom_dout),
+    .addr (cpu_addr),
+    .m1   (~m1_n),
+    .dout (rom_dout_dec)
+);
+
+wire [7:0] rom_dout_eff = (sindbadm_en & ~cpu_addr[15]) ? rom_dout_dec : rom_dout;
 
 //----------------------------------------------------------------------------
 // Main RAM 2KB @ 0xC800–0xCFFF — dual-port: Z80 + hiscore
@@ -515,28 +540,42 @@ end
 //                        i.e. only d3 and d0 survive, as {d3,d0,d3,d0}
 //   $BD not connected
 //----------------------------------------------------------------------------
-reg [9:0] bg_scrollx, bg_scrolly;
-reg       bg_enable;
-reg [3:0] bg_char_bank;
+// Monster Bash uses the SAME $B8-$BD range with different semantics
+// (monsterb_back_port_w): only port 4 is connected, carrying char bank,
+// an 8-page Y select and the enable. It has no X scroll, and unlike Pig
+// Newton all four char-bank bits are significant.
+reg [9:0]  bg_scrollx;
+reg [10:0] bg_scrolly;      // 11 bits — Monster Bash pages reach 0x700
+reg        bg_enable;
+reg [3:0]  bg_char_bank;
 
 always @(posedge clk_sys or posedge reset) begin
     if (reset) begin
         bg_scrollx   <= 10'd0;
-        bg_scrolly   <= 10'd0;
+        bg_scrolly   <= 11'd0;
         bg_enable    <= 1'b0;
         bg_char_bank <= 4'd0;
     end else if (io_write & io_b8_bd & ce_cpu) begin
-        case (port_addr[2:0])
-            3'd0: bg_scrollx[7:0] <= cpu_dout;
-            3'd1: begin
-                bg_scrollx[9:8] <= cpu_dout[1:0];
-                bg_enable       <= cpu_dout[7];
+        if (mb_en) begin
+            // d0-d3 = CG0-CG3, d4-d6 = SCN0-2, d7 = BKGEN
+            if (port_addr[2:0] == 3'd4) begin
+                bg_char_bank <= cpu_dout[3:0];
+                bg_scrolly   <= {cpu_dout[6:4], 8'd0};   // (data << 4) & 0x700
+                bg_enable    <= cpu_dout[7];
             end
-            3'd2: bg_scrolly[7:0] <= cpu_dout;
-            3'd3: bg_scrolly[9:8] <= cpu_dout[1:0];
-            3'd4: bg_char_bank    <= {cpu_dout[3], cpu_dout[0], cpu_dout[3], cpu_dout[0]};
-            default: ;
-        endcase
+        end else begin
+            case (port_addr[2:0])
+                3'd0: bg_scrollx[7:0] <= cpu_dout;
+                3'd1: begin
+                    bg_scrollx[9:8] <= cpu_dout[1:0];
+                    bg_enable       <= cpu_dout[7];
+                end
+                3'd2: bg_scrolly[7:0] <= cpu_dout;
+                3'd3: bg_scrolly[9:8] <= cpu_dout[1:0];
+                3'd4: bg_char_bank    <= {cpu_dout[3], cpu_dout[0], cpu_dout[3], cpu_dout[0]};
+                default: ;
+            endcase
+        end
     end
 end
 
@@ -545,6 +584,7 @@ assign bg_scrolly_o   = bg_scrolly;
 assign bg_enable_o    = bg_enable;
 assign bg_char_bank_o = bg_char_bank;
 assign video_control_3_o = video_control[3];
+assign video_control_6_o = video_control[6];
 
 wire [7:0] video_port_r =
     port_addr[0] ? {5'b11111, video_control[2], video_flip_r, vblank_latch}
@@ -571,12 +611,13 @@ wire [7:0] video_port_r =
 //   SINDBADM(4)/
 //   PIGNEWT(5):    4-way, 1 button.    D7D6: 6=UP
 //                                      D5D4: 2=LEFT,3=BTN1,6=RIGHT,7=DOWN
-//   SPACEOD (2):   8-way, 2 buttons,   D7D6: 5=BTN2,6=BTN1
-//                  MAME tags every                        (no upright
-//                  relevant bit                            layout ever
-//                  PORT_COCKTAIL                           shipped)
-//                  (no upright ever   D5D4: 2=UP,3=LEFT,6=DOWN,7=RIGHT
-//                  shipped)
+//   SPACEOD (2):   8-way, 2 buttons. UNIQUE: it is the only G-80 raster game
+//                  whose $FC port carries PLAYER 1 (every other game tags
+//                  those bits PORT_COCKTAIL = player 2). D7D6/D5D4 hold the
+//                  COCKTAIL (P2) side: D7D6 5=BTN2,6=BTN1;
+//                  D5D4 2=UP,3=LEFT,6=DOWN,7=RIGHT. In UPRIGHT the game
+//                  re-reads P1's UP/BTN1/BTN2 out of D5D4 — see the
+//                  spaceod_mangled_ports_r / spaceod_port_fc_r block below.
 //----------------------------------------------------------------------------
 reg d7d6_b5, d7d6_b6;
 reg d5d4_b2, d5d4_b3, d5d4_b6, d5d4_b7;
@@ -587,10 +628,10 @@ always @(*) begin
             d5d4_b2 = ~p1_left;  d5d4_b3 = ~p1_fire1;
             d5d4_b6 = ~p1_right; d5d4_b7 = ~p1_fire2;
         end
-        3'd2: begin // SPACEOD
-            d7d6_b5 = ~p1_fire2; d7d6_b6 = ~p1_fire1;
-            d5d4_b2 = ~p1_up;    d5d4_b3 = ~p1_left;
-            d5d4_b6 = ~p1_down;  d5d4_b7 = ~p1_right;
+        3'd2: begin // SPACEOD — these are the COCKTAIL (P2) bits; P1 is on $FC
+            d7d6_b5 = ~p2_fire2; d7d6_b6 = ~p2_fire1;
+            d5d4_b2 = ~p2_up;    d5d4_b3 = ~p2_left;
+            d5d4_b6 = ~p2_down;  d5d4_b7 = ~p2_right;
         end
         default: begin // MONSTERB/005/SINDBADM/PIGNEWT
             d7d6_b5 = 1'b1;      d7d6_b6 = ~p1_up;
@@ -646,10 +687,34 @@ endfunction
 // Mangled port read — MAME segag80r.cpp:452-465
 //   shift = port_addr & 3; each logical byte is right-shifted by shift.
 //----------------------------------------------------------------------------
+//----------------------------------------------------------------------------
+// Space Odyssey cabinet shuffle — MAME spaceod_mangled_ports_r (468-495) and
+// spaceod_port_fc_r (496-509). The ports are wired for COCKTAIL; in UPRIGHT
+// the cocktail bits are forced inactive and P1's UP/BUTTON1/BUTTON2 are read
+// out of D5D4 bits 4/3/2 instead, while $FC keeps only LEFT/RIGHT/DOWN with
+// the two horizontal bits swapped.
+//----------------------------------------------------------------------------
+wire so_upright = logical_d3d2[2];          // Cabinet DIP: 1 = upright
+
+// $FC as MAME codes it for spaceod: PLAYER 1, ACTIVE-HIGH.
+wire [7:0] so_fc_raw = {2'b00, p1_fire2, p1_fire1, p1_up, p1_down, p1_right, p1_left};
+
+// spaceod_port_fc_r: swap D0/D1 and mask to 0x07.
+wire [7:0] so_fc_dout = so_upright ? {5'b00000, so_fc_raw[2], so_fc_raw[0], so_fc_raw[1]}
+                                   : so_fc_raw;
+
+// spaceod_mangled_ports_r: d7d6 |= 0x60; d5d4 = (d5d4 & ~0x1c) | moved bits | 0xc0.
+wire [7:0] so_d7d6 = logical_d7d6 | 8'h60;
+wire [7:0] so_d5d4 = (logical_d5d4 & 8'hE3)
+                   | {2'b11, 1'b0, ~so_fc_raw[3], ~so_fc_raw[4], ~so_fc_raw[5], 2'b00};
+
+wire [7:0] eff_d7d6 = (so_en & so_upright) ? so_d7d6 : logical_d7d6;
+wire [7:0] eff_d5d4 = (so_en & so_upright) ? so_d5d4 : logical_d5d4;
+
 wire [1:0] mux_shift = port_addr[1:0];
 wire [7:0] mangled_dout = demangle(
-    logical_d7d6 >> mux_shift,
-    logical_d5d4 >> mux_shift,
+    eff_d7d6 >> mux_shift,
+    eff_d5d4 >> mux_shift,
     logical_d3d2 >> mux_shift,
     logical_d1d0 >> mux_shift
 );
@@ -676,15 +741,16 @@ wire [7:0] fc_dout = {
 //----------------------------------------------------------------------------
 always @* begin
     casez (1'b1)
-        (rom_sel):                    cpu_din = rom_dout;
+        (rom_sel):                    cpu_din = rom_dout_eff;
         (ram_sel  & mem_read):        cpu_din = mainram_dout;
         (vram_sel & mem_read):        cpu_din = vidram_dout;
         (usb_sel  & mem_read):        cpu_din = usb_pgm_dout_i;
         (io_read  & io_be_bf):        cpu_din = video_port_r;
         (io_read  & io_f8_fb):        cpu_din = mangled_dout;
-        (io_read  & io_fc):           cpu_din = fc_dout;
+        (io_read  & io_fc):           cpu_din = so_en ? so_fc_dout : fc_dout;
         (io_read  & io_3f & usb_en):  cpu_din = usb_status_i;
         (io_read  & io_08_0f & so_en):cpu_din = so_port_dout_i;
+        (io_read  & io_0c_0f & mb_en):cpu_din = 8'h00;   // PPI: never busy
         default:                      cpu_din = 8'hFF;
     endcase
 end

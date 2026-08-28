@@ -17,6 +17,8 @@
     <rbf>SegaG80</rbf>
     <about></about>
 
+    <buttons names="Fire,Not Used,Not Used,Not Used,Coin,Start 1P,Start 2P,Pause" default="A,B,X,Y,Select,Start,R,L"/>
+
     <!-- Index 1: Game ID byte — MUST appear before index 0 in MRA.
          0x01 = Monster Bash (315-0082 security chip). -->
     <rom index="1"><part>01</part></rom>
@@ -72,7 +74,7 @@
         <dip bits="0,1"   name="Lives"        ids="3,5,4,6"/>
         <dip bits="2"     name="Cabinet"      ids="Cocktail,Upright"/>
         <dip bits="3,4"   name="Difficulty"   ids="Easy,Hard,Medium,Hardest"/>
-        <dip bits="5,6"   name="Bonus Life"   ids="None,40000,10000,20000"/>
+        <dip bits="5,6"   name="Bonus Life"   ids="None,10000,20000,40000"/>
         <dip bits="7"     name="Infinite Lives (Cheat)" ids="On,Off"/>
         <dip bits="8,11"  name="Coin A"       ids="4C/1C,3C/1C,2C/1C,1C/1C,1C/2C,1C/3C,1C/4C,1C/5C,1C/6C,2C/1C 5/3 6/4,2C/1C 4/3,1C/1C 5/6,1C/1C 4/5,1C/1C 2/3,1C/2C 5/11,1C/2C 4/9"/>
         <dip bits="12,15" name="Coin B"       ids="4C/1C,3C/1C,2C/1C,1C/1C,1C/2C,1C/3C,1C/4C,1C/5C,1C/6C,2C/1C 5/3 6/4,2C/1C 4/3,1C/1C 5/6,1C/1C 4/5,1C/1C 2/3,1C/2C 5/11,1C/2C 4/9"/>
@@ -108,19 +110,38 @@
         <part crc="f38488fe" name="1801b.prom-u23"/>
     </rom>
 
-    <!-- Index 1: Background board ROMs — NOT CONSUMED.
-         Monster Bash background board: gfx1 (2 × 8 KB), gfx2 (1 × 8 KB).
-         Sound board ROMs: 7751 program (1 KB), UPD7751 samples (2 × 4 KB).
-         RTL has no Monster Bash background or sound board support yet.
-    <rom index="1" md5="none" zip="monsterb.zip">
+    <!-- Index 7: Background board tile ROMs (MAME "gfx1", 2 x 8 KB RAW).
+         ROM_REGION is 0x10000 because MAME materialises monsterb_expand_gfx's
+         16-bank expansion; only 0x4000 is real ROM. Do NOT pre-expand here —
+         segag80_bg.sv does the banking as address arithmetic:
+         rom_p0[{bank[1:0],code,row}] / rom_p1[{bank[3:2],code,row}].
+         Plane 0 (LSB) then plane 1 (MSB) — identical shape to Pig Newton. -->
+    <rom index="7" md5="none" zip="monsterb.zip">
         <part crc="e93a2281" name="1516.bg-u13"/>
         <part crc="1e589101" name="1517.bg-u8"/>
-        <part crc="2d5932fe" name="1518a.bg-u22"/>
-        <part crc="6a9534fc" name="7751.bin"/>
-        <part crc="b525ce8f" name="1543snd.bin"/>
-        <part crc="56c79fb0" name="1544snd.bin"/>
     </rom>
-    -->
+
+    <!-- Index 8: Background board TILEMAP ROM (MAME "gfx2", 1 x 8 KB).
+         Tilemap is 32 tiles wide x region_bytes/32 = 256 tall -> 256x2048 px,
+         so xmask=0xFF ymask=0x7FF. The SCN0-2 bits of port 4 ($BC) select one
+         of 8 pages: bg_scrolly = (data << 4) & 0x700 = 8 x 256 lines. -->
+    <rom index="8" md5="none" zip="monsterb.zip">
+        <part crc="2d5932fe" name="1518a.bg-u22"/>
+    </rom>
+
+    <!-- Sound board ROMs — NOT YET CONSUMED, indices deliberately unassigned.
+         The Monster Bash sound board is TMS3617 music + uPD7751 samples and
+         needs THREE separate regions, so the index layout should be decided
+         when the RTL lands rather than guessed here:
+           soundbrd:audiocpu  0x0400  7751.bin      crc 6a9534fc
+           soundbrd:upd7751   0x2000  1543snd.bin   crc b525ce8f
+                                      1544snd.bin   crc 56c79fb0
+           prom               0x0020  pr1512.u31    crc 414ebe9b
+         NOTE: pr1512.u31 is the 82S123 that sound_a_w indexes to derive the
+         TMS3617 voice-enable mask — it was missing from this MRA entirely.
+         WARNING: the previous version of this block was written as
+         <rom index="1">, which is the GAME ID index. Uncommenting it as-is
+         would have overwritten game_id with ROM data. Do not reuse index 1. -->
 
     <!-- Index 2: Reserved for hiscore. -->
     <rom index="2" md5="none"></rom>

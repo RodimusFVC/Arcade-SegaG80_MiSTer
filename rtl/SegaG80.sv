@@ -91,18 +91,21 @@ wire  [7:0] cpu_vram_din;
 wire        cpu_vram_wr;
 wire  [7:0] vidram_to_cpu;
 wire        vc1;
+wire        vc6;
 wire        vflip;
 
 // Background board (Pig Newton / Sindbad Mystery)
 wire        vc3;
-wire  [9:0] bg_scrollx, bg_scrolly;
+wire  [9:0] bg_scrollx;
+wire [10:0] bg_scrolly;
 wire        bg_enable;
 wire  [3:0] bg_char_bank;
 wire  [3:0] bg_color;
 wire  [1:0] bg_pix;
 
 // game_id 5 = PIGNEWT — the only background board wired up so far.
-wire        bg_board = (game_id == 3'd5);
+wire        mb_board = (game_id == 3'd1);   // Monster Bash
+wire        bg_board = (game_id == 3'd5) | mb_board;
 
 // Space Odyssey background board — game_id 2.
 wire        so_board = (game_id == 3'd2);
@@ -196,6 +199,7 @@ SegaG80_CPU cpu_board (
     .vram_wr_o           (cpu_vram_wr),
     .vidram_din_i        (vidram_to_cpu),
     .video_control_1_o   (vc1),
+    .video_control_6_o   (vc6),
     .video_flip_o        (vflip),
     .video_control_3_o   (vc3),
     .bg_scrollx_o        (bg_scrollx),
@@ -301,6 +305,7 @@ segag80_bg bg_inst (
     .bg_scrolly       (bg_scrolly),
     .bg_char_bank     (bg_char_bank),
     .bg_flip          (vc3 ^ crt_flip),
+    .mb_mode          (mb_board),
     .ioctl_addr       (ioctl_addr),
     .ioctl_data       (ioctl_data),
     .ioctl_wr         (ioctl_wr),
@@ -317,8 +322,10 @@ segag80_video video_inst (
     .cpu_din          (cpu_vram_din),
     .cpu_wr           (cpu_vram_wr),
     .video_control_1  (vc1),
+    .video_control_6  (vc6),
     .video_flip       (vflip ^ crt_flip),
     .bg_board         (bg_board),
+    .mb_board         (mb_board),
     .bg_enable        (bg_enable),
     .bg_color         (bg_color),
     .bg_pix           (bg_pix),

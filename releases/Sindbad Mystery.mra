@@ -17,8 +17,10 @@
     <rbf>SegaG80</rbf>
     <about></about>
 
+    <buttons names="Action,Not Used,Not Used,Not Used,Coin,Start 1P,Start 2P,Pause" default="A,B,X,Y,Select,Start,R,L"/>
+
     <!-- Index 1: Game ID byte — MUST appear before index 0 in MRA.
-         0x04 = Sindbad Mystery (315-5028 encrypted Z80 — NOT YET SUPPORTED). -->
+         0x04 = Sindbad Mystery (315-5028 encrypted Z80). -->
     <rom index="1"><part>04</part></rom>
 
     <resolution>15kHz</resolution>
@@ -75,8 +77,8 @@
         <dip bits="0,1"   name="Lives"        ids="3,5,4,6"/>
         <dip bits="2"     name="Cabinet"      ids="Cocktail,Upright"/>
         <dip bits="7"     name="Infinite Lives (Cheat)" ids="On,Off"/>
-        <dip bits="8,11"  name="Coin A"       ids="4C/1C,3C/1C,2C/1C,2C/1C 5/3,2C/1C 4/3,2C/3C,1C/1C,1C/1C 5/6,1C/1C 4/5,1C/1C 2/3,1C/1C,1C/2C,1C/3C,1C/4C,1C/5C,1C/6C"/>
-        <dip bits="12,15" name="Coin B"       ids="4C/1C,3C/1C,2C/1C,2C/1C 5/3,2C/1C 4/3,2C/3C,1C/1C,1C/1C 5/6,1C/1C 4/5,1C/1C 2/3,1C/1C,1C/2C,1C/3C,1C/4C,1C/5C,1C/6C"/>
+        <dip bits="8,11"  name="Coin A"       ids="1C/2C 5/11,1C/1C 2/3,1C/1C 4/5,1C/1C 5/6,2C/1C 4/3,2C/1C 5/3,2C/3C,4C/1C,3C/1C,2C/1C,1C/6C,1C/5C,1C/4C,1C/3C,1C/2C,1C/1C"/>
+        <dip bits="12,15" name="Coin B"       ids="1C/2C 5/11,1C/1C 2/3,1C/1C 4/5,1C/1C 5/6,2C/1C 4/3,2C/1C 5/3,2C/3C,4C/1C,3C/1C,2C/1C,1C/6C,1C/5C,1C/4C,1C/3C,1C/2C,1C/1C"/>
     </switches>
 
     <!-- Index 0: Main CPU ROMs — 48 KB contiguous into 0x0000-0xBFFF
@@ -94,21 +96,33 @@
         <part crc="e57ff63c" name="epr-5398.4m"/>
     </rom>
 
-    <!-- Index 1: Audio Z80 ROM + Background ROMs — NOT CONSUMED.
-         Audio: epr-5400.4a (8 KB Z80 program for 2× SN76496 sound board)
-         Background gfx1: epr-5428.9m + epr-5429.9p (2 × 8 KB)
-         Background gfx2: epr-5424.9e + epr-5425.9h + epr-5426.9j + epr-5427.9l (4 × 8 KB)
-         RTL has no Sindbad Mystery sound or background support.
-    <rom index="1" md5="none" zip="sindbadm.zip">
+    <!-- Index 6: Audio Z80 program (System 1 sound board: Z80 + 2x SN76496).
+         MAME ROM_REGION(0x2000,"audiocpu") — segag80r.cpp:1803.
+         Delivered at a free index; no RTL consumer yet. -->
+    <rom index="6" md5="none" zip="sindbadm.zip">
         <part crc="5114f18e" name="epr-5400.4a"/>
+    </rom>
+
+    <!-- Index 7: Background tile ROMs (MAME "gfx1", 2 x 8 KB = 16 KB).
+         gfx_monsterb / gfx_8x8x2_planar — plane 0 then plane 1, which is the
+         split segag80_bg.sv already makes on ioctl_addr[13]. -->
+    <rom index="7" md5="none" zip="sindbadm.zip">
         <part crc="f6044a1e" name="epr-5428.9m"/>
         <part crc="b23eca10" name="epr-5429.9p"/>
+    </rom>
+
+    <!-- Index 8: Background TILEMAP ROM (MAME "gfx2", 4 x 8 KB = 32 KB).
+         WARNING: segag80_bg.sv's rom_map is 16 KB (ld_map = ioctl_addr[13:0]),
+         so the upper half currently wraps onto the lower. Widen that array to
+         32 KB before enabling the Sindbad background, or the map silently
+         self-overwrites — see Common-Pitfalls "ioctl write gate must match MRA
+         layout" (CS window vs eprom address space). -->
+    <rom index="8" md5="none" zip="sindbadm.zip">
         <part crc="4bfc2e95" name="epr-5424.9e"/>
         <part crc="b654841a" name="epr-5425.9h"/>
         <part crc="9de0da28" name="epr-5426.9j"/>
         <part crc="a94f4d41" name="epr-5427.9l"/>
     </rom>
-    -->
 
     <!-- Index 2: Reserved for hiscore. -->
     <rom index="2" md5="none"></rom>

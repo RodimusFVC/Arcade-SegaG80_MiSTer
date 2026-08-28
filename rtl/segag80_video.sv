@@ -14,10 +14,12 @@ module segag80_video (
     input        [7:0] cpu_din,
     input              cpu_wr,
     input              video_control_1, // m_video_control[1]: palette enable
+    input              video_control_6, // m_video_control[6]: Monster Bash bg palette
     input              video_flip,      // m_video_flip
 
     // Background board (G80_BACKGROUND_PIGNEWT/SINDBADM) — from segag80_bg
-    input              bg_board,        // this game has a background board
+    input              bg_board,        // this game has a 2bpp background board
+    input              mb_board,        // Monster Bash — different palette gate
     input              bg_enable,       // port $B9 d7
     input        [3:0] bg_color,
     input        [1:0] bg_pix,
@@ -51,7 +53,16 @@ module segag80_video (
     //   fall through with offset &= 0x3f and clobber foreground entries.
     //------------------------------------------------------------------------
     wire pal_write    = cpu_wr & cpu_addr[12] & video_control_1;
-    wire bg_pal_write = pal_write & bg_board & (cpu_addr[12:6] == 7'b1000001);
+    wire bg_pal_hit   = (cpu_addr[12:6] == 7'b1000001);
+    // monsterb_videoram_w gates the background-palette intercept on
+    // video_control[6], not [1], and does NOT return afterwards — MAME: "since
+    // the background board is not integrated with the main board, writes here
+    // also write through to regular videoram". Leaving pal_write/vram_write
+    // untouched gives that write-through for free. If both gates are open at
+    // once the background entry wins the single palette write port.
+    wire bg_pal_write = mb_board ? (cpu_wr & bg_pal_hit & video_control_6)
+                                 : (pal_write & bg_board & bg_pal_hit);
+    wire pal_we       = pal_write | bg_pal_write;
     wire vram_write   = cpu_wr & ~pal_write;
 
     //------------------------------------------------------------------------
@@ -80,7 +91,7 @@ module segag80_video (
     wire [6:0] pal_wr_addr = {bg_pal_write, cpu_addr[5:0]};
 
     always @(posedge clk) begin
-        if (pal_write)
+        if (pal_we)
             pal[pal_wr_addr] <= cpu_din;
     end
 

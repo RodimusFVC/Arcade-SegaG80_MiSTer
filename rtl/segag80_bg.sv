@@ -5,7 +5,13 @@
 //  Based on MAME segag80r_v.cpp (bg_get_tile_info, draw_background_full_scroll,
 //  pignewt_back_port_w) and segag80r.cpp (monsterb_expand_gfx, gfx_monsterb).
 //
-//  Used by G80_BACKGROUND_PIGNEWT (Pig Newton) and G80_BACKGROUND_SINDBADM.
+//  Used by G80_BACKGROUND_PIGNEWT (Pig Newton), G80_BACKGROUND_SINDBADM and,
+//  via mb_mode, G80_BACKGROUND_MONSTERB (draw_background_page_scroll).
+//
+//  Monster Bash shares bg_get_tile_info and monsterb_expand_gfx but differs
+//  in geometry and scrolling: 32 x (gfx2/32) = 32x256 tiles => 256x2048 px,
+//  an 8-bit flip mask, no X scroll, and a Y offset that is an 8-page select
+//  added OUTSIDE the 8-bit line wrap — that is what makes it page scroll.
 //
 //  The tilemap is 128 x 128 tiles of 8x8 (gfx2 region is 0x4000 bytes, one
 //  byte per tile => 0x4000/128 = 128 rows), giving a 1024x1024 pixmap, so
@@ -31,9 +37,10 @@ module segag80_bg (
 
     // Background board registers — ports $B8-$BD
     input        [9:0] bg_scrollx,
-    input        [9:0] bg_scrolly,
+    input       [10:0] bg_scrolly,
     input        [3:0] bg_char_bank,
     input              bg_flip,         // video_control[3]
+    input              mb_mode,         // 1 = Monster Bash page scroll
 
     // ROM loading
     input       [24:0] ioctl_addr,
@@ -68,12 +75,26 @@ module segag80_bg (
     wire [8:0] fetch_v_raw  = fetch_h_wrap ? (v_cnt + 9'd1) : v_cnt;
     wire [8:0] fetch_v      = (fetch_v_raw >= 9'd262) ? 9'd0 : fetch_v_raw;
 
-    // MAME: effx = (x + scrollx) ^ flipmask, then & (pixmap_width - 1).
+    // Pig Newton / Sindbad — draw_background_full_scroll:
+    //   effx = (x + scrollx) ^ flipmask, effy = (y + scrolly) ^ flipmask, 10-bit.
     wire [9:0] flipmask = {10{bg_flip}};
-    wire [9:0] effx     = ({1'b0, fetch_h} + bg_scrollx) ^ flipmask;
-    wire [9:0] effy     = ({1'b0, fetch_v} + bg_scrolly) ^ flipmask;
+    wire [9:0] effx_fs  = ({1'b0, fetch_h} + bg_scrollx) ^ flipmask;
+    wire [9:0] effy_fs  = ({1'b0, fetch_v} + bg_scrolly[9:0]) ^ flipmask;
 
-    wire [13:0] map_rd_addr = {effy[9:3], effx[9:3]};
+    // Monster Bash — draw_background_page_scroll:
+    //   effy = scrolly + (((y ^ flip) + (flip & 0xe0)) & 0xff)
+    //   effx = (x ^ flip)                       (bg_scrollx is always 0 here)
+    wire [7:0]  flipmask8 = {8{bg_flip}};
+    wire [7:0]  ps_inner  = (fetch_v[7:0] ^ flipmask8) + (bg_flip ? 8'hE0 : 8'h00);
+    wire [10:0] effy_ps   = bg_scrolly + {3'd0, ps_inner};
+    wire [7:0]  effx_ps   = fetch_h[7:0] ^ flipmask8;
+
+    wire [10:0] effy = mb_mode ? effy_ps : {1'b0, effy_fs};
+    wire [9:0]  effx = mb_mode ? {2'b00, effx_ps} : effx_fs;
+
+    // Map is 128 tiles wide for full-scroll, 32 for Monster Bash.
+    wire [13:0] map_rd_addr = mb_mode ? {1'b0, effy[10:3], effx[7:3]}
+                                      : {effy[9:3], effx[9:3]};
 
     //------------------------------------------------------------------------
     // Two-stage fetch: tilemap byte, then its two plane bytes in parallel.
