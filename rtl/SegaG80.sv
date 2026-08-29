@@ -110,6 +110,8 @@ wire        bg_board = (game_id == 3'd5) | mb_board | sm_board;
 
 // Space Odyssey background board — game_id 2.
 wire        so_board = (game_id == 3'd2);
+wire        mb_music_wr;
+wire  [7:0] mb_music_din;
 wire        sm_snd_wr, sm_ppi_pc_wr;
 wire  [7:0] sm_snd_din, sm_ppi_pc_din;
 wire        so_port_wr;
@@ -231,6 +233,8 @@ SegaG80_CPU cpu_board (
     .so_port_addr_o      (so_port_addr),
     .so_port_din_o       (so_port_din),
     .so_port_dout_i      (so_port_dout),
+    .mb_music_wr_o       (mb_music_wr),
+    .mb_music_din_o      (mb_music_din),
     .sm_snd_wr_o         (sm_snd_wr),
     .sm_snd_din_o        (sm_snd_din),
     .sm_ppi_pc_wr_o      (sm_ppi_pc_wr),
@@ -511,6 +515,26 @@ spaceod_sound_io #(.CLK_HZ(15_468_480)) spaceod_snd_inst (
 );
 
 //----------------------------------------------------------------------------
+// Monster Bash music — TMS3617 + the pr1512.u31 82S123 at ioctl index 4.
+// Its own leg alongside the uPD7751 voice, muted off-game. MAME routes music
+// and the voice DAC at 0.5 each; level here is by ear, like the other boards.
+//----------------------------------------------------------------------------
+localparam MBM_GAIN_LOG2 = 0;
+
+wire signed [15:0] mb_music_sample;
+
+monsterb_music #(.CLK_HZ(15_468_480)) mb_music_inst (
+    .clk         (clk_sys),
+    .reset       (reset),
+    .port_a_wr   (mb_music_wr),
+    .port_a_din  (mb_music_din),
+    .ioctl_addr  (ioctl_addr[4:0]),
+    .ioctl_data  (ioctl_data),
+    .ioctl_wr    (ioctl_wr & (ioctl_index == 8'd4)),
+    .audio       (mb_music_sample)
+);
+
+//----------------------------------------------------------------------------
 // Sindbad Mystery sound board (Sega System 1: Z80 + 2x SN76496/JT89).
 // Program ROM is ioctl index 6 — shared with Monster Bash's uPD7751 program,
 // which is harmless since only one game's MRA ever loads. Summed as its own
@@ -541,8 +565,10 @@ wire signed [15:0] sod_mix    = so_board ? spaceod_sample : 16'sd0;
 wire signed [19:0] sod_scaled = $signed({{4{sod_mix[15]}}, sod_mix});
 wire signed [19:0] smx_mix    = sm_board ? $signed({{4{sindbadm_sample[15]}}, sindbadm_sample})
                                          : 20'sd0;
+wire signed [15:0] mbm_mix    = mb_board ? mb_music_sample : 16'sd0;
+wire signed [19:0] mbm_scaled = $signed({{4{mbm_mix[15]}}, mbm_mix}) <<< MBM_GAIN_LOG2;
 wire signed [19:0] mix_all    = $signed({{3{mixed[16]}}, mixed}) + usb_scaled + mbv_scaled
-                              + (sod_scaled <<< SOD_GAIN_LOG2) + smx_mix;
+                              + (sod_scaled <<< SOD_GAIN_LOG2) + smx_mix + mbm_scaled;
 
 assign audio_out = pause ? 16'sd0 :
     (mix_all >  20'sd32767) ?  16'sd32767 :

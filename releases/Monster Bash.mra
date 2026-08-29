@@ -145,13 +145,17 @@
         <part crc="56c79fb0" name="1544snd.bin"/>
     </rom>
 
-    <!-- NOT YET CONSUMED — the MUSIC half of the sound board:
-           prom  0x0020  pr1512.u31  crc 414ebe9b
-         An 82S123 that sound_a_w indexes with the top nibble of port A to get
-         the TMS3617 voice-enable mask. Needed when the TMS3617 lands, along
-         with the SHOT/DIVE discrete circuits (MAME fakes those with samples).
+    <!-- Index 4: 82S123 voice-enable PROM (32 bytes, MAME "prom").
+         sound_a_w indexes it with the top nibble of PPI port A; bits 7-2 of
+         the result are the TMS3617's six voice-enable lines.
          WARNING: an older revision of this file listed the sound ROMs under
          <rom index="1">, which is the GAME ID index — do not reuse index 1. -->
+    <rom index="4" md5="none" zip="monsterb.zip">
+        <part crc="414ebe9b" name="pr1512.u31"/>
+    </rom>
+
+    <!-- STILL NOT CONSUMED: the SHOT/DIVE discrete circuits. MAME fakes those
+         with samples, so they need the schematic and synthesis. -->
 
     <!-- Index 2: Reserved for hiscore. -->
     <rom index="2" md5="none"></rom>

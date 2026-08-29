@@ -65,3 +65,8 @@ set_global_assignment -name SYSTEMVERILOG_FILE rtl/ram_rom/speech_data_rom.sv
 # JT89 (Jose Tejada, GPLv3) is the SN76489/SN76496 core; the verilog QIP is the
 # .v flavour, so no VHDL_2008 mixing. T80s is already listed above.
 set_global_assignment -name QIP_FILE rtl/sound/jt89/syn/quartus/jt89_verilog.qip
+
+# --- TMS36XX organ tone generator (port of MAME sound/tms36xx.cpp) ----------
+# Reusable: TMS3617 (Monster Bash) and TMS3615 (Naughty Boy / Pleiads).
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/tms36xx.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/monsterb/monsterb_music.sv

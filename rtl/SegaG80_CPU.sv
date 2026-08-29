@@ -95,6 +95,10 @@ module SegaG80_CPU (
     output       [7:0] so_port_din_o,
     input        [7:0] so_port_dout_i,
 
+    // Monster Bash music — i8255 PPI port A write ($0C)
+    output             mb_music_wr_o,
+    output       [7:0] mb_music_din_o,
+
     // Sindbad Mystery sound board — i8255 PPI port A / port C writes
     output             sm_snd_wr_o,
     output       [7:0] sm_snd_din_o,
@@ -473,6 +477,11 @@ always @(posedge clk_sys or posedge reset) begin
     else if (mb_en & io_write & (port_addr == 8'h0E) & ce_cpu) mb_snd_cmd <= cpu_dout;
 end
 assign mb_snd_cmd_o = mb_snd_cmd;
+
+// Monster Bash PPI port A ($0C) write — sound_a_w: TMS3617 note in the low
+// nibble, 82S123 voice-mask address in the high nibble.
+assign mb_music_wr_o  = mb_en & io_write & (port_addr == 8'h0C) & ce_cpu;
+assign mb_music_din_o = cpu_dout;
 wire [7:0] sm_ppi_dout = (port_addr[1:0] == 2'd1) ? sm_ppi_b : 8'h00;
 wire io_0c_0f = (port_addr >= 8'h0C) & (port_addr <= 8'h0F);
 wire io_08_0f = (port_addr >= 8'h08) & (port_addr <= 8'h0F);
