@@ -5,7 +5,9 @@ set_global_assignment -name SYSTEMVERILOG_FILE rtl/tb_astrob.sv
 set_global_assignment -name SYSTEMVERILOG_FILE Arcade-SegaG80.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/SegaG80.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/SegaG80_CPU.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/astrob_audio.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/astrob_audio.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/spaceod_audio.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/sindbadm_audio.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/segag80_decrypt.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/segag80_5028.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/segag80_video.sv
@@ -59,3 +61,7 @@ set_global_assignment -name VERILOG_FILE       rtl/sound/usb/i8035.v
 # --- Speech board ROM loaders ---
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/ram_rom/speech_cpu_rom.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/ram_rom/speech_data_rom.sv
+# --- Sindbad Mystery sound board (Sega System 1: Z80 + 2x SN76496) ----------
+# JT89 (Jose Tejada, GPLv3) is the SN76489/SN76496 core; the verilog QIP is the
+# .v flavour, so no VHDL_2008 mixing. T80s is already listed above.
+set_global_assignment -name QIP_FILE rtl/sound/jt89/syn/quartus/jt89_verilog.qip

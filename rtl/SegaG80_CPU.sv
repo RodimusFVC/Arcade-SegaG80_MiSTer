@@ -93,7 +93,13 @@ module SegaG80_CPU (
     output             so_port_wr_o,
     output       [2:0] so_port_addr_o,
     output       [7:0] so_port_din_o,
-    input        [7:0] so_port_dout_i
+    input        [7:0] so_port_dout_i,
+
+    // Sindbad Mystery sound board — i8255 PPI port A / port C writes
+    output             sm_snd_wr_o,
+    output       [7:0] sm_snd_din_o,
+    output             sm_ppi_pc_wr_o,
+    output       [7:0] sm_ppi_pc_din_o
 );
 
 //----------------------------------------------------------------------------
@@ -835,6 +841,21 @@ assign usb_pgm_wr_o   = usb_sel & mem_write & ce_cpu;
 assign so_port_wr_o   = io_write & io_08_0f & so_en & ce_cpu;
 assign so_port_addr_o = port_addr[2:0];
 assign so_port_din_o  = cpu_dout;
+
+// Sindbad Mystery sound board (MAME sindbadm_portmap + sindbadm_misc_w).
+// Port A ($80) is the command latch the sound Z80 reads at $E000; port C
+// bit 7 is its /NMI. The control port ($83) can drive that same bit through
+// an i8255 bit-set/reset word, so both routes are decoded.
+wire sm_ppi_wr  = io_write & io_80_83 & sm_en & ce_cpu;
+wire sm_pa_wr   = sm_ppi_wr & (port_addr[1:0] == 2'd0);
+wire sm_pc_wr   = sm_ppi_wr & (port_addr[1:0] == 2'd2);
+wire sm_bsr_pc7 = sm_ppi_wr & (port_addr[1:0] == 2'd3)
+                            & ~cpu_dout[7] & (cpu_dout[3:1] == 3'd7);
+
+assign sm_snd_wr_o     = sm_pa_wr;
+assign sm_snd_din_o    = cpu_dout;
+assign sm_ppi_pc_wr_o  = sm_pc_wr | sm_bsr_pc7;
+assign sm_ppi_pc_din_o = sm_pc_wr ? cpu_dout : {cpu_dout[0], 7'b0};
 
 // Speech board strobes (MAME segag80r.cpp:1890-1891)
 assign speech_data_we_o = io_write & io_38 & ce_cpu;

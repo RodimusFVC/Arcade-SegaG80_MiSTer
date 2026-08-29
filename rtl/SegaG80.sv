@@ -110,6 +110,8 @@ wire        bg_board = (game_id == 3'd5) | mb_board | sm_board;
 
 // Space Odyssey background board — game_id 2.
 wire        so_board = (game_id == 3'd2);
+wire        sm_snd_wr, sm_ppi_pc_wr;
+wire  [7:0] sm_snd_din, sm_ppi_pc_din;
 wire        so_port_wr;
 wire  [2:0] so_port_addr;
 wire  [7:0] so_port_din;
@@ -228,7 +230,11 @@ SegaG80_CPU cpu_board (
     .so_port_wr_o        (so_port_wr),
     .so_port_addr_o      (so_port_addr),
     .so_port_din_o       (so_port_din),
-    .so_port_dout_i      (so_port_dout)
+    .so_port_dout_i      (so_port_dout),
+    .sm_snd_wr_o         (sm_snd_wr),
+    .sm_snd_din_o        (sm_snd_din),
+    .sm_ppi_pc_wr_o      (sm_ppi_pc_wr),
+    .sm_ppi_pc_din_o     (sm_ppi_pc_din)
 );
 
 //----------------------------------------------------------------------------
@@ -483,11 +489,60 @@ monsterb_voice #(.CLK_HZ(15_468_480), .GAIN_LOG2(0)) mb_voice_inst (
     .audio      (mb_voice_sample)
 );
 
+//----------------------------------------------------------------------------
+// Space Odyssey discrete sound board (Gremlin/SEGA 834-0051). Trigger latches
+// IC43/IC44 are at $0E/$0F, inside the $08-$0F block the background board
+// already decodes, so it shares so_port_wr. Summed as its own leg, muted
+// off-game. Level: adjust by ear — 0 = the board model's own output level.
+//----------------------------------------------------------------------------
+localparam SOD_GAIN_LOG2 = 0;
+
+wire signed [15:0] spaceod_sample;
+
+spaceod_sound_io #(.CLK_HZ(15_468_480)) spaceod_snd_inst (
+    .clk        (clk_sys),
+    .reset      (reset),
+    .db         (so_port_din),
+    .wr_ck0     (so_port_wr & (so_port_addr == 3'd7)),   // IC44 = $0F
+    .wr_ck1     (so_port_wr & (so_port_addr == 3'd6)),   // IC43 = $0E
+    .enable     (so_board),
+    .audio      (spaceod_sample),
+    .ce_snd     ()
+);
+
+//----------------------------------------------------------------------------
+// Sindbad Mystery sound board (Sega System 1: Z80 + 2x SN76496/JT89).
+// Program ROM is ioctl index 6 — shared with Monster Bash's uPD7751 program,
+// which is harmless since only one game's MRA ever loads. Summed as its own
+// leg, muted off-game. Level: adjust by ear — 4 puts both chips at full scale.
+//----------------------------------------------------------------------------
+localparam SM_GAIN_LOG2 = 4;
+
+wire signed [15:0] sindbadm_sample;
+
+sindbadm_sound #(.CLK_HZ(15_468_480), .GAIN_LOG2(SM_GAIN_LOG2)) sindbadm_snd_inst (
+    .clk        (clk_sys),
+    .reset      (reset),
+    .latch_wr   (sm_snd_wr),
+    .latch_din  (sm_snd_din),
+    .pc_wr      (sm_ppi_pc_wr),
+    .pc_din     (sm_ppi_pc_din),
+    .ioctl_addr (ioctl_addr[12:0]),
+    .ioctl_data (ioctl_data),
+    .ioctl_wr   (ioctl_wr & (ioctl_index == 8'd6)),
+    .audio      (sindbadm_sample)
+);
+
 wire signed [15:0] usb_mix    = usb_en ? usb_sample : 16'sd0;
 wire signed [19:0] usb_scaled = $signed({{4{usb_mix[15]}}, usb_mix}) <<< USB_GAIN_LOG2;
 wire signed [15:0] mbv_mix    = mb_board ? mb_voice_sample : 16'sd0;
 wire signed [19:0] mbv_scaled = $signed({{4{mbv_mix[15]}}, mbv_mix}) <<< MBV_GAIN_LOG2;
-wire signed [19:0] mix_all    = $signed({{3{mixed[16]}}, mixed}) + usb_scaled + mbv_scaled;
+wire signed [15:0] sod_mix    = so_board ? spaceod_sample : 16'sd0;
+wire signed [19:0] sod_scaled = $signed({{4{sod_mix[15]}}, sod_mix});
+wire signed [19:0] smx_mix    = sm_board ? $signed({{4{sindbadm_sample[15]}}, sindbadm_sample})
+                                         : 20'sd0;
+wire signed [19:0] mix_all    = $signed({{3{mixed[16]}}, mixed}) + usb_scaled + mbv_scaled
+                              + (sod_scaled <<< SOD_GAIN_LOG2) + smx_mix;
 
 assign audio_out = pause ? 16'sd0 :
     (mix_all >  20'sd32767) ?  16'sd32767 :
