@@ -20,6 +20,7 @@ module segag80_video (
     // Background board (G80_BACKGROUND_PIGNEWT/SINDBADM) — from segag80_bg
     input              bg_board,        // this game has a 2bpp background board
     input              mb_board,        // Monster Bash — different palette gate
+    input              sm_board,        // Sindbad — bg palette at $1000-$103F
     input              bg_enable,       // port $B9 d7
     input        [3:0] bg_color,
     input        [1:0] bg_pix,
@@ -53,7 +54,10 @@ module segag80_video (
     //   fall through with offset &= 0x3f and clobber foreground entries.
     //------------------------------------------------------------------------
     wire pal_write    = cpu_wr & cpu_addr[12] & video_control_1;
-    wire bg_pal_hit   = (cpu_addr[12:6] == 7'b1000001);
+    // sindbadm_videoram_w intercepts $F000-$F03F; pignewt/monsterb use
+    // $F040-$F07F. Same gate bit ([1]) and same early return as Pig Newton.
+    wire bg_pal_hit   = sm_board ? (cpu_addr[12:6] == 7'b1000000)
+                                 : (cpu_addr[12:6] == 7'b1000001);
     // monsterb_videoram_w gates the background-palette intercept on
     // video_control[6], not [1], and does NOT return afterwards — MAME: "since
     // the background board is not integrated with the main board, writes here

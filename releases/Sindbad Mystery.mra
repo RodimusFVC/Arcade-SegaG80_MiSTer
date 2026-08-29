@@ -112,11 +112,9 @@
     </rom>
 
     <!-- Index 8: Background TILEMAP ROM (MAME "gfx2", 4 x 8 KB = 32 KB).
-         WARNING: segag80_bg.sv's rom_map is 16 KB (ld_map = ioctl_addr[13:0]),
-         so the upper half currently wraps onto the lower. Widen that array to
-         32 KB before enabling the Sindbad background, or the map silently
-         self-overwrites — see Common-Pitfalls "ioctl write gate must match MRA
-         layout" (CS window vs eprom address space). -->
+         segag80_bg.sv's rom_map was widened to 32 KB (ld_map = ioctl_addr[14:0])
+         on 2026-08-28 to hold this. Tilemap is 128 tiles wide x 32768/128 = 256
+         tall -> 1024x2048 px, so xmask=0x3FF ymask=0x7FF. -->
     <rom index="8" md5="none" zip="sindbadm.zip">
         <part crc="4bfc2e95" name="epr-5424.9e"/>
         <part crc="b654841a" name="epr-5425.9h"/>

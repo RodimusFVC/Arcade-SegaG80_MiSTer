@@ -59,6 +59,8 @@ module SegaG80_CPU (
     output             video_flip_o,
     output             video_control_3_o,   // background board flip
     output             video_control_6_o,   // Monster Bash bg palette enable
+    output       [7:0] mb_snd_cmd_o,        // Monster Bash $0E latch -> uPD7751
+    input              mb_snd_busy_i,       // uPD7751 status -> $0E read bit 4
 
     // Background board registers (ports $B8-$BD)
     output       [9:0] bg_scrollx_o,
@@ -235,12 +237,18 @@ always @(posedge clk_sys) vblank_d <= vblank_in;
 reg irq_pend;
 wire irq_ack = ~m1_n & ~iorq_n;   // Z80 INTA cycle
 
+// Sindbad (sindbadm_vblank_start): interrupts are ALWAYS enabled — not masked
+// by video_control[2] — and are acknowledged MANUALLY by a write to $40, not by
+// the INTA cycle. Its machine_config replaces the CPU without re-installing
+// segag80r_irq_ack, so INTA must not clear the latch on that game.
+wire sm_irq_ack = sm_en & io_write & io_40 & ce_cpu;
+
 always @(posedge clk_sys or posedge reset) begin
     if (reset)
         irq_pend <= 1'b0;
-    else if (vblank_rising && video_control[2])
+    else if (vblank_rising && (sm_en || video_control[2]))
         irq_pend <= 1'b1;
-    else if (irq_ack && ce_cpu)
+    else if (sm_en ? sm_irq_ack : (irq_ack && ce_cpu))
         irq_pend <= 1'b0;
 end
 
@@ -396,6 +404,19 @@ wire usb_sel   = usb_en & (cpu_addr >= 16'hD000) & (cpu_addr <= 16'hDFFF);
 //----------------------------------------------------------------------------
 wire [7:0] port_addr = cpu_addr[7:0];
 wire io_be_bf = (port_addr == 8'hBE) | (port_addr == 8'hBF);
+
+// Sindbad Mystery has its own I/O map (MAME sindbadm_portmap):
+//   $40 = IRQ acknowledge, $41 = background control,
+//   $42/$43 = video ports (NOT $BE/$BF), $80-$83 = i8255 PPI,
+//   $F8-$FB = mangled ports, and no $FC at all.
+wire sm_en    = (game_id == 3'd4);
+wire io_42_43 = (port_addr == 8'h42) | (port_addr == 8'h43);
+wire io_80_83 = (port_addr >= 8'h80) & (port_addr <= 8'h83);
+wire io_40    = (port_addr == 8'h40);
+
+// Video port select — same register, different address on Sindbad. Bit 0 picks
+// the control register in both cases ($BF and $43).
+wire io_vid   = sm_en ? io_42_43 : io_be_bf;
 wire io_f8_fb = (port_addr >= 8'hF8) & (port_addr <= 8'hFB);
 // $F9 and mirror $FD are coin-counter writes (MAME segag80r.cpp:513-517).
 // No physical counter to drive on MiSTer; decoded so as to decode-complete
@@ -432,6 +453,21 @@ wire so_en    = (game_id == 3'd2);
 // coin-up. 005 shares this port map but never reads it, which is why only
 // Monster Bash is affected.
 wire mb_en    = (game_id == 3'd1);
+
+// Sindbad's i8255 has in_pb_callback = ioport("FC"), so the game reads player
+// inputs through PPI port B ($81). Layout is sindbadm's FC PORT_MODIFY, all
+// ACTIVE-LOW: d0 LEFT, d1 RIGHT, d2 BUTTON1, d3 DOWN, d4 UP, d7:5 unused.
+wire [7:0] sm_ppi_b = {3'b111, ~p2_up, ~p2_down, ~p2_fire1, ~p2_right, ~p2_left};
+
+// Monster Bash PPI port C ($0E) write — upd7751_command_w: d0-d2 command to
+// the 7751's S0-2, d3 = /INT. Latched here and handed to the voice board.
+reg [7:0] mb_snd_cmd;
+always @(posedge clk_sys or posedge reset) begin
+    if (reset)                                            mb_snd_cmd <= 8'h08;
+    else if (mb_en & io_write & (port_addr == 8'h0E) & ce_cpu) mb_snd_cmd <= cpu_dout;
+end
+assign mb_snd_cmd_o = mb_snd_cmd;
+wire [7:0] sm_ppi_dout = (port_addr[1:0] == 2'd1) ? sm_ppi_b : 8'h00;
 wire io_0c_0f = (port_addr >= 8'h0C) & (port_addr <= 8'h0F);
 wire io_08_0f = (port_addr >= 8'h08) & (port_addr <= 8'h0F);
 
@@ -504,7 +540,7 @@ reg [7:0] video_control;    // latched at port $BF write
 always @(posedge clk_sys or posedge reset) begin
     if (reset)
         video_control <= 8'd0;
-    else if (io_write & io_be_bf & port_addr[0] & ce_cpu)
+    else if (io_write & io_vid & port_addr[0] & ce_cpu)
         video_control <= cpu_dout;
 end
 
@@ -555,7 +591,14 @@ always @(posedge clk_sys or posedge reset) begin
         bg_scrolly   <= 11'd0;
         bg_enable    <= 1'b0;
         bg_char_bank <= 4'd0;
-    end else if (io_write & io_b8_bd & ce_cpu) begin
+    end else if (sm_en & io_write & (port_addr == 8'h41) & ce_cpu) begin
+        // sindbadm_back_port_w port 1: d0-d1 ROM bank, d2-d3 X page,
+        // d4-d6 Y page, d7 enable. Port 0 ($40) is the IRQ ack, handled above.
+        bg_char_bank <= {2'b00, cpu_dout[1:0]};
+        bg_scrollx   <= {cpu_dout[3:2], 8'd0};   // (data << 6) & 0x300
+        bg_scrolly   <= {cpu_dout[6:4], 8'd0};   // (data << 4) & 0x700
+        bg_enable    <= cpu_dout[7];
+    end else if (io_write & io_b8_bd & ce_cpu & ~sm_en) begin
         if (mb_en) begin
             // d0-d3 = CG0-CG3, d4-d6 = SCN0-2, d7 = BKGEN
             if (port_addr[2:0] == 3'd4) begin
@@ -745,12 +788,16 @@ always @* begin
         (ram_sel  & mem_read):        cpu_din = mainram_dout;
         (vram_sel & mem_read):        cpu_din = vidram_dout;
         (usb_sel  & mem_read):        cpu_din = usb_pgm_dout_i;
-        (io_read  & io_be_bf):        cpu_din = video_port_r;
+        (io_read  & io_vid):          cpu_din = video_port_r;
         (io_read  & io_f8_fb):        cpu_din = mangled_dout;
         (io_read  & io_fc):           cpu_din = so_en ? so_fc_dout : fc_dout;
         (io_read  & io_3f & usb_en):  cpu_din = usb_status_i;
         (io_read  & io_08_0f & so_en):cpu_din = so_port_dout_i;
-        (io_read  & io_0c_0f & mb_en):cpu_din = 8'h00;   // PPI: never busy
+        // $0E returns upd7751_status_r = busy << 4; other PPI regs read 0.
+        (io_read  & io_0c_0f & mb_en):cpu_din = (port_addr == 8'h0E)
+                                              ? {3'b000, mb_snd_busy_i, 4'b0000}
+                                              : 8'h00;
+        (io_read  & io_80_83 & sm_en):cpu_din = sm_ppi_dout;
         default:                      cpu_din = 8'hFF;
     endcase
 end

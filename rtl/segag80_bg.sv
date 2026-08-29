@@ -41,6 +41,7 @@ module segag80_bg (
     input        [3:0] bg_char_bank,
     input              bg_flip,         // video_control[3]
     input              mb_mode,         // 1 = Monster Bash page scroll
+    input              sm_mode,         // 1 = Sindbad page scroll, 128-wide, unexpanded gfx
 
     // ROM loading
     input       [24:0] ioctl_addr,
@@ -59,11 +60,11 @@ module segag80_bg (
     //------------------------------------------------------------------------
     reg [7:0] rom_p0  [0:8191];     // gfx1 0x0000-0x1FFF — plane 0 (LSB)
     reg [7:0] rom_p1  [0:8191];     // gfx1 0x2000-0x3FFF — plane 1 (MSB)
-    reg [7:0] rom_map [0:16383];    // gfx2 — one byte per tile
+    reg [7:0] rom_map [0:32767];    // gfx2 — one byte per tile (Sindbad needs 32 KB)
 
     wire        ld_plane1 = ioctl_addr[13];
     wire [12:0] ld_tile   = ioctl_addr[12:0];
-    wire [13:0] ld_map    = ioctl_addr[13:0];
+    wire [14:0] ld_map    = ioctl_addr[14:0];
 
     //------------------------------------------------------------------------
     // Fetch two display pixels ahead. The wrap logic mirrors segag80_video.sv
@@ -89,12 +90,19 @@ module segag80_bg (
     wire [10:0] effy_ps   = bg_scrolly + {3'd0, ps_inner};
     wire [7:0]  effx_ps   = fetch_h[7:0] ^ flipmask8;
 
-    wire [10:0] effy = mb_mode ? effy_ps : {1'b0, effy_fs};
-    wire [9:0]  effx = mb_mode ? {2'b00, effx_ps} : effx_fs;
+    // Sindbad shares the page-scroll formula but keeps a 128-wide map and a
+    // real X scroll ((data<<6)&0x300), so effx must carry bg_scrollx.
+    wire        page_mode = mb_mode | sm_mode;
+    wire [9:0]  effx_pg   = bg_scrollx + {2'b00, effx_ps};
 
-    // Map is 128 tiles wide for full-scroll, 32 for Monster Bash.
-    wire [13:0] map_rd_addr = mb_mode ? {1'b0, effy[10:3], effx[7:3]}
-                                      : {effy[9:3], effx[9:3]};
+    wire [10:0] effy = page_mode ? effy_ps : {1'b0, effy_fs};
+    wire [9:0]  effx = page_mode ? effx_pg : effx_fs;
+
+    // Pixmaps: Pig Newton 1024x1024, Monster Bash 256x2048, Sindbad 1024x2048.
+    // Map width: 128 tiles except Monster Bash's 32.
+    wire [14:0] map_rd_addr = mb_mode ? {2'b00, effy[10:3], effx[7:3]}
+                            : sm_mode ? {      effy[10:3], effx[9:3]}
+                                      : {2'b00, effy[9:3],  effx[9:3]};
 
     //------------------------------------------------------------------------
     // Two-stage fetch: tilemap byte, then its two plane bytes in parallel.
@@ -107,7 +115,11 @@ module segag80_bg (
     reg [2:0] px_s2;
 
     wire [12:0] p0_rd_addr = {bg_char_bank[1:0], code_s1, row_s1};
-    wire [12:0] p1_rd_addr = {bg_char_bank[3:2], code_s1, row_s1};
+    // init_sindbadm does NOT call monsterb_expand_gfx: gfx1 is a plain
+    // gfx_8x8x2_planar region, so plane 1 uses the SAME bank bits as plane 0.
+    // The expanded games take plane 1's bank from bits [3:2] instead.
+    wire [12:0] p1_rd_addr = sm_mode ? {bg_char_bank[1:0], code_s1, row_s1}
+                                     : {bg_char_bank[3:2], code_s1, row_s1};
 
     always @(posedge clk) begin
         if (ioctl_wr & sel_map)                rom_map[ld_map]  <= ioctl_data;

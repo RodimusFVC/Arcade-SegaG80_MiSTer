@@ -105,7 +105,8 @@ wire  [1:0] bg_pix;
 
 // game_id 5 = PIGNEWT — the only background board wired up so far.
 wire        mb_board = (game_id == 3'd1);   // Monster Bash
-wire        bg_board = (game_id == 3'd5) | mb_board;
+wire        sm_board = (game_id == 3'd4);   // Sindbad Mystery
+wire        bg_board = (game_id == 3'd5) | mb_board | sm_board;
 
 // Space Odyssey background board — game_id 2.
 wire        so_board = (game_id == 3'd2);
@@ -128,6 +129,9 @@ wire  [7:0] usb_pgm_din;
 wire        usb_pgm_wr;
 wire  [7:0] usb_pgm_dout;
 wire signed [15:0] usb_sample;
+wire        [7:0]  mb_snd_cmd;
+wire               mb_snd_busy;
+wire signed [15:0] mb_voice_sample;
 
 // Videoram/palette output from T1.5
 wire  [7:0] pix_r8, pix_g8, pix_b8;
@@ -200,6 +204,8 @@ SegaG80_CPU cpu_board (
     .vidram_din_i        (vidram_to_cpu),
     .video_control_1_o   (vc1),
     .video_control_6_o   (vc6),
+    .mb_snd_cmd_o        (mb_snd_cmd),
+    .mb_snd_busy_i       (mb_snd_busy),
     .video_flip_o        (vflip),
     .video_control_3_o   (vc3),
     .bg_scrollx_o        (bg_scrollx),
@@ -306,6 +312,7 @@ segag80_bg bg_inst (
     .bg_char_bank     (bg_char_bank),
     .bg_flip          (vc3 ^ crt_flip),
     .mb_mode          (mb_board),
+    .sm_mode          (sm_board),
     .ioctl_addr       (ioctl_addr),
     .ioctl_data       (ioctl_data),
     .ioctl_wr         (ioctl_wr),
@@ -326,6 +333,7 @@ segag80_video video_inst (
     .video_flip       (vflip ^ crt_flip),
     .bg_board         (bg_board),
     .mb_board         (mb_board),
+    .sm_board         (sm_board),
     .bg_enable        (bg_enable),
     .bg_color         (bg_color),
     .bg_pix           (bg_pix),
@@ -455,9 +463,31 @@ wire signed [16:0] mixed   = mix_sum[17:1];   // master 0.5 on the SUM, per MAME
 // 3 = 8x, 0 = the vector core's unity. The clamp below catches overshoot.
 localparam USB_GAIN_LOG2 = 2;
 
+//----------------------------------------------------------------------------
+// Monster Bash uPD7751 voice board. Summed as its own leg, muted off-game, so
+// the Astro Blaster / speech mix above is untouched.
+// Level: adjust by ear — 0 = raw R-2R ladder level, 1 = 2x, 2 = 4x.
+//----------------------------------------------------------------------------
+localparam MBV_GAIN_LOG2 = 1;
+
+monsterb_voice #(.CLK_HZ(15_468_480), .GAIN_LOG2(0)) mb_voice_inst (
+    .clk        (clk_sys),
+    .reset      (reset),
+    .cmd_w      (mb_snd_cmd),
+    .busy       (mb_snd_busy),
+    .ioctl_addr (ioctl_addr),
+    .ioctl_data (ioctl_data),
+    .ioctl_wr   (ioctl_wr),
+    .sel_pgm    (ioctl_index == 8'd6),
+    .sel_smp    (ioctl_index == 8'd9),
+    .audio      (mb_voice_sample)
+);
+
 wire signed [15:0] usb_mix    = usb_en ? usb_sample : 16'sd0;
 wire signed [19:0] usb_scaled = $signed({{4{usb_mix[15]}}, usb_mix}) <<< USB_GAIN_LOG2;
-wire signed [19:0] mix_all    = $signed({{3{mixed[16]}}, mixed}) + usb_scaled;
+wire signed [15:0] mbv_mix    = mb_board ? mb_voice_sample : 16'sd0;
+wire signed [19:0] mbv_scaled = $signed({{4{mbv_mix[15]}}, mbv_mix}) <<< MBV_GAIN_LOG2;
+wire signed [19:0] mix_all    = $signed({{3{mixed[16]}}, mixed}) + usb_scaled + mbv_scaled;
 
 assign audio_out = pause ? 16'sd0 :
     (mix_all >  20'sd32767) ?  16'sd32767 :

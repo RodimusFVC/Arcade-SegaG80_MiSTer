@@ -129,19 +129,29 @@
         <part crc="2d5932fe" name="1518a.bg-u22"/>
     </rom>
 
-    <!-- Sound board ROMs — NOT YET CONSUMED, indices deliberately unassigned.
-         The Monster Bash sound board is TMS3617 music + uPD7751 samples and
-         needs THREE separate regions, so the index layout should be decided
-         when the RTL lands rather than guessed here:
-           soundbrd:audiocpu  0x0400  7751.bin      crc 6a9534fc
-           soundbrd:upd7751   0x2000  1543snd.bin   crc b525ce8f
-                                      1544snd.bin   crc 56c79fb0
-           prom               0x0020  pr1512.u31    crc 414ebe9b
-         NOTE: pr1512.u31 is the 82S123 that sound_a_w indexes to derive the
-         TMS3617 voice-enable mask — it was missing from this MRA entirely.
-         WARNING: the previous version of this block was written as
-         <rom index="1">, which is the GAME ID index. Uncommenting it as-is
-         would have overwritten game_id with ROM data. Do not reuse index 1. -->
+    <!-- Index 6: uPD7751 program ROM (1 KB, MAME "soundbrd:audiocpu").
+         The 7751 is an MCS-48 part; monsterb_voice.sv runs it on the existing
+         i8035/t48_core wrapper with EA=1, feeding this on the external bus. -->
+    <rom index="6" md5="none" zip="monsterb.zip">
+        <part crc="6a9534fc" name="7751.bin"/>
+    </rom>
+
+    <!-- Index 9: uPD7751 sample ROMs (2 x 4 KB = 8 KB, "soundbrd:upd7751").
+         Addressed by the i8243 expander: P4/P5/P6 give address bits 0-3/4-7/
+         8-11, P7 selects the ROM (active low). Raw 8-bit PCM straight to an
+         R-2R ladder on the 7751's port 1 — no LPC, unlike Astro Blaster. -->
+    <rom index="9" md5="none" zip="monsterb.zip">
+        <part crc="b525ce8f" name="1543snd.bin"/>
+        <part crc="56c79fb0" name="1544snd.bin"/>
+    </rom>
+
+    <!-- NOT YET CONSUMED — the MUSIC half of the sound board:
+           prom  0x0020  pr1512.u31  crc 414ebe9b
+         An 82S123 that sound_a_w indexes with the top nibble of port A to get
+         the TMS3617 voice-enable mask. Needed when the TMS3617 lands, along
+         with the SHOT/DIVE discrete circuits (MAME fakes those with samples).
+         WARNING: an older revision of this file listed the sound ROMs under
+         <rom index="1">, which is the GAME ID index — do not reuse index 1. -->
 
     <!-- Index 2: Reserved for hiscore. -->
     <rom index="2" md5="none"></rom>
