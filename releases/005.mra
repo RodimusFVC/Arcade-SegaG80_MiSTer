@@ -94,11 +94,19 @@
         <part repeat="0x1800">FF</part>
     </rom>
 
-    <!-- Index 1: Sound board ROMs — NOT CONSUMED.
-         005 uses a discrete melody generator + DAC sound board (no CPU ROM).
-         epr-1286.sound-16 is a 2716 used for the melody lookup table;
-         the 6331 sound PROM is marked BAD_DUMP in MAME.
-         Sound board is not emulated in current RTL. -->
+    <!-- 005 sound board (Sega 834-0130). No sound CPU — a discrete melody
+         generator plus seven effect voices, all synthesized in RTL.
+         Index 1 is the GAME ID index — do not reuse it for ROMs.
+
+         Index 5: epr-1286.sound-16, the 2716 melody lookup table (U16).
+         Index 10: 6331.sound-u8, the 32x8 divisor PROM (U8). MAME marks this
+         one BAD_DUMP, so melody pitches may be off until a good dump exists. -->
+    <rom index="5" md5="none" zip="005.zip">
+        <part crc="fbe0d501" name="epr-1286.sound-16"/>
+    </rom>
+    <rom index="10" md5="none" zip="005.zip">
+        <part crc="1d298cb0" name="6331.sound-u8"/>
+    </rom>
 
     <!-- Index 2: Reserved for hiscore. -->
     <rom index="2" md5="none"></rom>

@@ -70,3 +70,14 @@ set_global_assignment -name QIP_FILE rtl/sound/jt89/syn/quartus/jt89_verilog.qip
 # Reusable: TMS3617 (Monster Bash) and TMS3615 (Naughty Boy / Pleiads).
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/tms36xx.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/monsterb/monsterb_music.sv
+
+# --- 005 discrete sound board (Sega 834-0130) -------------------------------
+# Melody chain (2716 tune ROM + 6331 divisor PROM, both MRA-loaded) plus the
+# seven effect voices, all synthesized from the schematic. MAME plays the
+# effects as WAV samples; nothing here needs sample data.
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/005/svf.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/005/mm5837_noise.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/005/i8255_mode0.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/005/melody_gen.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/005/fx_bank.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/005/sega005_audio.sv

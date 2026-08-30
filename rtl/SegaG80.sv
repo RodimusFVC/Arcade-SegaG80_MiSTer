@@ -114,6 +114,10 @@ wire        mb_music_wr;
 wire  [7:0] mb_music_din;
 wire        sm_snd_wr, sm_ppi_pc_wr;
 wire  [7:0] sm_snd_din, sm_ppi_pc_din;
+wire        s5_board = (game_id == 3'd3);   // 005
+wire        s5_ppi_wr;
+wire  [1:0] s5_ppi_addr;
+wire  [7:0] s5_ppi_din;
 wire        so_port_wr;
 wire  [2:0] so_port_addr;
 wire  [7:0] so_port_din;
@@ -238,7 +242,10 @@ SegaG80_CPU cpu_board (
     .sm_snd_wr_o         (sm_snd_wr),
     .sm_snd_din_o        (sm_snd_din),
     .sm_ppi_pc_wr_o      (sm_ppi_pc_wr),
-    .sm_ppi_pc_din_o     (sm_ppi_pc_din)
+    .sm_ppi_pc_din_o     (sm_ppi_pc_din),
+    .s5_ppi_wr_o         (s5_ppi_wr),
+    .s5_ppi_addr_o       (s5_ppi_addr),
+    .s5_ppi_din_o        (s5_ppi_din)
 );
 
 //----------------------------------------------------------------------------
@@ -557,6 +564,30 @@ sindbadm_sound #(.CLK_HZ(15_468_480), .GAIN_LOG2(SM_GAIN_LOG2)) sindbadm_snd_ins
     .audio      (sindbadm_sample)
 );
 
+//----------------------------------------------------------------------------
+// 005 discrete sound board (Sega 834-0130) — melody chain plus seven effect
+// voices, all synthesized from the schematic. The 2716 tune ROM is at ioctl
+// index 5 and the 6331 divisor PROM at index 10. Summed as its own leg, muted
+// off-game. Level: adjust by ear — 0 = the board model's own output level.
+//----------------------------------------------------------------------------
+localparam S5_GAIN_LOG2 = 0;
+
+wire signed [15:0] sega005_sample;
+
+sega005_sound #(.CLK_HZ(15_468_480)) sega005_snd_inst (
+    .clk        (clk_sys),
+    .reset      (reset),
+    .ppi_wr     (s5_ppi_wr),
+    .ppi_addr   (s5_ppi_addr),
+    .ppi_din    (s5_ppi_din),
+    .ioctl_addr (ioctl_addr),
+    .ioctl_data (ioctl_data),
+    .ioctl_wr   (ioctl_wr),
+    .sel_rom    (ioctl_index == 8'd5),
+    .sel_prom   (ioctl_index == 8'd10),
+    .audio      (sega005_sample)
+);
+
 wire signed [15:0] usb_mix    = usb_en ? usb_sample : 16'sd0;
 wire signed [19:0] usb_scaled = $signed({{4{usb_mix[15]}}, usb_mix}) <<< USB_GAIN_LOG2;
 wire signed [15:0] mbv_mix    = mb_board ? mb_voice_sample : 16'sd0;
@@ -567,8 +598,11 @@ wire signed [19:0] smx_mix    = sm_board ? $signed({{4{sindbadm_sample[15]}}, si
                                          : 20'sd0;
 wire signed [15:0] mbm_mix    = mb_board ? mb_music_sample : 16'sd0;
 wire signed [19:0] mbm_scaled = $signed({{4{mbm_mix[15]}}, mbm_mix}) <<< MBM_GAIN_LOG2;
+wire signed [15:0] s5_mix     = s5_board ? sega005_sample : 16'sd0;
+wire signed [19:0] s5_scaled  = $signed({{4{s5_mix[15]}}, s5_mix}) <<< S5_GAIN_LOG2;
 wire signed [19:0] mix_all    = $signed({{3{mixed[16]}}, mixed}) + usb_scaled + mbv_scaled
-                              + (sod_scaled <<< SOD_GAIN_LOG2) + smx_mix + mbm_scaled;
+                              + (sod_scaled <<< SOD_GAIN_LOG2) + smx_mix + mbm_scaled
+                              + s5_scaled;
 
 assign audio_out = pause ? 16'sd0 :
     (mix_all >  20'sd32767) ?  16'sd32767 :

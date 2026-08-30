@@ -103,7 +103,12 @@ module SegaG80_CPU (
     output             sm_snd_wr_o,
     output       [7:0] sm_snd_din_o,
     output             sm_ppi_pc_wr_o,
-    output       [7:0] sm_ppi_pc_din_o
+    output       [7:0] sm_ppi_pc_din_o,
+
+    // 005 sound board — i8255 PPI writes ($0C-$0F)
+    output             s5_ppi_wr_o,
+    output       [1:0] s5_ppi_addr_o,
+    output       [7:0] s5_ppi_din_o
 );
 
 //----------------------------------------------------------------------------
@@ -463,6 +468,11 @@ wire so_en    = (game_id == 3'd2);
 // coin-up. 005 shares this port map but never reads it, which is why only
 // Monster Bash is affected.
 wire mb_en    = (game_id == 3'd1);
+
+// 005 shares main_ppi8255_portmap with Monster Bash: $0C = port A (the seven
+// effect triggers), $0D = port B (melody). Writes only — 005 never reads the
+// PPI, so the cpu_din default of 8'hFF is left alone.
+wire s5_en    = (game_id == 3'd3);
 
 // Sindbad's i8255 has in_pb_callback = ioport("FC"), so the game reads player
 // inputs through PPI port B ($81). Layout is sindbadm's FC PORT_MODIFY, all
@@ -865,6 +875,11 @@ assign sm_snd_wr_o     = sm_pa_wr;
 assign sm_snd_din_o    = cpu_dout;
 assign sm_ppi_pc_wr_o  = sm_pc_wr | sm_bsr_pc7;
 assign sm_ppi_pc_din_o = sm_pc_wr ? cpu_dout : {cpu_dout[0], 7'b0};
+
+// 005 sound board bus (MAME sega005_sound_board: out_pa = effects, out_pb = melody).
+assign s5_ppi_wr_o   = io_write & io_0c_0f & s5_en & ce_cpu;
+assign s5_ppi_addr_o = port_addr[1:0];
+assign s5_ppi_din_o  = cpu_dout;
 
 // Speech board strobes (MAME segag80r.cpp:1890-1891)
 assign speech_data_we_o = io_write & io_38 & ce_cpu;
