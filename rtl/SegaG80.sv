@@ -13,6 +13,9 @@
 module SegaG80 (
     input                reset,
     input                crt_flip,     // OSD CRT Flip; XORed into the video path only
+    // DIAG-REVERT-2026-09-01: OSD Screen Centering, passed straight to segag80_vtg
+    input          [3:0] h_center,
+    input          [3:0] v_center,
     input                clk_sys,      // 15.468480 MHz (MAME VIDEO_CLOCK)
     input          [2:0] game_id,      // 0=ASTROB,1=MONSTERB,2=SPACEOD,3=005,4=SINDBADM,5=PIGNEWT
 
@@ -307,6 +310,8 @@ segag80_vtg vtg (
     .clk    (clk_sys),
     .reset  (reset),
     .ce_pix (ce_pix_i),
+    .h_center (h_center),   // DIAG-REVERT-2026-09-01
+    .v_center (v_center),   // DIAG-REVERT-2026-09-01
     .h_cnt  (vtg_h),
     .v_cnt  (vtg_v),
     .hblank (hblank_i),

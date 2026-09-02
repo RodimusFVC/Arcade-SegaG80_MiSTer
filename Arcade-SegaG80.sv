@@ -88,6 +88,17 @@ localparam CONF_STR = {
 	"P1OB,HDMI Flip,Off,On;",
 	"P1OM,CRT Flip,Off,On;",
 	"P1OFH,Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",
+	// DIAG-REVERT-2026-09-01: centering lives with the other screen options, not in a
+	// submenu of its own. These two entries already existed but were never wired to the
+	// RTL -- the menu did nothing. Now live, and the labels match the sign-extended
+	// two's complement offsets in segag80_vtg.sv. The old lists had the signs inverted
+	// and were short (15 and 13 entries for 4-bit fields).
+	// Originals, uncomment to restore (they sat under a "P3,Screen Centering;" header
+	// below the DIP block, which is also removed):
+	// "P3O36,H Center,0,-1,-2,-3,-4,-5,-6,-7,+7,+6,+5,+4,+3,+2,+1;",
+	// "P3O7A,V Center,0,-1,-2,-3,-4,-5,-6,-7,-8,-9,-10,-11,-12;",
+	"P1O36,H Center,0,+1,+2,+3,+4,+5,+6,+7,-8,-7,-6,-5,-4,-3,-2,-1;",
+	"P1O7A,V Center,0,+1,+2,+3,+4,+5,+6,+7,-8,-7,-6,-5,-4,-3,-2,-1;",
 	"-;",
 	"H1OR,Autosave Hiscores,Off,On;",
 	"P2,Pause Options;",
@@ -95,10 +106,6 @@ localparam CONF_STR = {
 	"P2OQ,Dim video after 10s,On,Off;",
 	"-;",
 	"DIP;",
-	"-;",
-	"P3,Screen Centering;",
-	"P3O36,H Center,0,-1,-2,-3,-4,-5,-6,-7,+7,+6,+5,+4,+3,+2,+1;",
-	"P3O7A,V Center,0,-1,-2,-3,-4,-5,-6,-7,-8,-9,-10,-11,-12;",
 	"-;",
 	"R0,Reset;",
 	// Slots 3/4 are unused by every game currently on this core (max real
@@ -165,11 +172,29 @@ hps_io #(.CONF_STR(CONF_STR)) hps_io
 
 ////////////////////   CLOCKS   ///////////////////
 //
-// Single PLL output at 15.468480 MHz (MAME segag80r.cpp:130 VIDEO_CLOCK).
+// outclk_0 = 15.468480 MHz (MAME segag80r.cpp:130 VIDEO_CLOCK).
 // Z80 runs at /4 (~3.867 MHz), pixel clock at /3 (~5.156 MHz).
 // Internal clock enables are generated inside SegaG80_CPU.
 //
+// DIAG-REVERT-2026-09-01: outclk_1 = 38.6712 MHz added and fed to arcade_video as
+// clk_video. sys/gamma_corr.sv walks its 768-entry LUT sequentially R->G->B and
+// needs at least FOUR clk_vid cycles per ce_pix to finish; driving clk_video from
+// CLK_SYS gave it exactly THREE (ce_pix = CLK_SYS/3, SegaG80_CPU.sv:151), so the
+// blue channel was served the green curve and green ran a pixel late whenever
+// gamma was enabled. Every other core in the fleet has ratio 8 -- Kangaroo does
+// the same thing deliberately, running its core on clk_10m but arcade_video on
+// CLK_40M. At 38.6712 MHz the ratio is 7.5, comfortably over 4.
+// ce_pix stays a CLK_SYS-domain pulse (2-3 cycles wide in the faster domain);
+// arcade_video rising-edge detects it, so CE is still one clean cycle. Both
+// clocks come from the same PLL and are phase-locked, so there is no CDC.
+// NOTE: this also moves sys's clk_vid (OSD, scandoubler, analog DAC, and
+// screen_rotate's DDRAM_CLK) from 15.47 to 38.67 MHz, which is in line with the
+// rest of the fleet rather than an outlier.
+// TO REVERT: drop .outclk_1 / CLK_VID here and in rtl/pll.v + rtl/pll/pll_0002.v,
+// and put .clk_video back to CLK_SYS.
+//
 wire CLK_SYS;
+wire CLK_VID;   // DIAG-REVERT-2026-09-01: 38.6712 MHz video clock
 wire locked;
 
 pll pll
@@ -177,6 +202,7 @@ pll pll
 	.refclk(CLK_50M),
 	.rst(0),
 	.outclk_0(CLK_SYS),
+	.outclk_1(CLK_VID),   // DIAG-REVERT-2026-09-01
 	.reconfig_to_pll(reconfig_to_pll),
 	.reconfig_from_pll(reconfig_from_pll),
 	.locked(locked)
@@ -372,7 +398,7 @@ arcade_video #(256, 24) arcade_video
 (
 	.*,
 
-	.clk_video(CLK_SYS),
+	.clk_video(CLK_VID),   // DIAG-REVERT-2026-09-01: was CLK_SYS (gamma_corr ratio)
 
 	.RGB_in(rgb_out),
 	.HBlank(hblank),
@@ -394,6 +420,8 @@ SegaG80 g80_inst
 (
 	.reset(reset),
 	.crt_flip(status[22]),
+	.h_center(status[6:3]),    // DIAG-REVERT-2026-09-01: menu was dead, now wired
+	.v_center(status[10:7]),   // DIAG-REVERT-2026-09-01: menu was dead, now wired
 	.clk_sys(CLK_SYS),
 	.game_id(game_id),
 

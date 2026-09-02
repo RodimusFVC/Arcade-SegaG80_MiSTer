@@ -849,7 +849,16 @@ assign ce_cpu_o     = ce_cpu;
 // Universal Sound Board bus (MAME segag80r.cpp:2003-2006, init_pignewt).
 // usb_ram_w applies decrypt_offset, so the shared-RAM window reuses the same
 // scrambled address the VRAM write path uses.
-assign usb_data_wr_o  = io_write & io_3f & usb_en & ce_cpu;
+// sega_usb's data_wr is a one-cycle strobe. A Z80 OUT holds IORQ+WR across T3
+// and the wait state, so gating the level with ce_cpu alone sends the byte 2-3
+// times; one-shot the leading edge, while cpu_dout is still driving.
+reg usb_io_wr_d;
+always @(posedge clk_sys or posedge reset) begin
+    if (reset)       usb_io_wr_d <= 1'b0;
+    else if (ce_cpu) usb_io_wr_d <= io_write & io_3f & usb_en;
+end
+
+assign usb_data_wr_o  = io_write & io_3f & usb_en & ce_cpu & ~usb_io_wr_d;
 assign usb_din_o      = cpu_dout;
 assign usb_pgm_addr_o = (usb_sel & mem_write) ? decrypt_addr[11:0]
                                               : cpu_addr[11:0];
