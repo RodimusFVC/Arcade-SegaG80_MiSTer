@@ -245,44 +245,66 @@ wire reset = RESET | status[0] | buttons[1] | ioctl_download | ~locked;
 
 ///////////////////         Keyboard           //////////////////
 
-reg btn_up       = 0;
-reg btn_down     = 0;
-reg btn_left     = 0;
-reg btn_right    = 0;
-reg btn_fire     = 0;
-reg btn_fire2    = 0;
-reg btn_coin1    = 0;
-reg btn_coin2    = 0;
-reg btn_1p_start = 0;
-reg btn_2p_start = 0;
-reg btn_pause    = 0;
-reg btn_service  = 0;
-reg btn_selftest = 0;
-
-wire pressed = ps2_key[9];
-wire [7:0] code = ps2_key[7:0];
-always @(posedge CLK_SYS) begin
-	reg old_state;
-	old_state <= ps2_key[10];
-	if(old_state != ps2_key[10]) begin
-		case(code)
-			'h16: btn_1p_start <= pressed; // 1
-			'h1E: btn_2p_start <= pressed; // 2
-			'h2E: btn_coin1    <= pressed; // 5
-			'h36: btn_coin2    <= pressed; // 6
-			'h46: btn_service  <= pressed; // 9  = SERVICE1 credit (MAME default key)
-				'h06: btn_selftest <= pressed; // F2 = CPU-board self-test switch (MAME default key)
-			'h4D: btn_pause    <= pressed; // P
-
-			'h75: btn_up      <= pressed; // up
-			'h72: btn_down    <= pressed; // down
-			'h6B: btn_left    <= pressed; // left
-			'h74: btn_right   <= pressed; // right
-			'h14: btn_fire    <= pressed; // ctrl
-			'h11: btn_fire2   <= pressed; // alt
-		endcase
-	end
-end
+// CTL-2026-10-25: original keyboard block, replaced by ctl_keyboard below
+// reg btn_up       = 0;
+// reg btn_down     = 0;
+// reg btn_left     = 0;
+// reg btn_right    = 0;
+// reg btn_fire     = 0;
+// reg btn_fire2    = 0;
+// reg btn_coin1    = 0;
+// reg btn_coin2    = 0;
+// reg btn_1p_start = 0;
+// reg btn_2p_start = 0;
+// reg btn_pause    = 0;
+// reg btn_service  = 0;
+// reg btn_selftest = 0;
+//
+// wire pressed = ps2_key[9];
+// wire [7:0] code = ps2_key[7:0];
+// always @(posedge CLK_SYS) begin
+// 	reg old_state;
+// 	old_state <= ps2_key[10];
+// 	if(old_state != ps2_key[10]) begin
+// 		case(code)
+// 			'h16: btn_1p_start <= pressed; // 1
+// 			'h1E: btn_2p_start <= pressed; // 2
+// 			'h2E: btn_coin1    <= pressed; // 5
+// 			'h36: btn_coin2    <= pressed; // 6
+// 			'h46: btn_service  <= pressed; // 9  = SERVICE1 credit (MAME default key)
+// 				'h06: btn_selftest <= pressed; // F2 = CPU-board self-test switch (MAME default key)
+// 			'h4D: btn_pause    <= pressed; // P
+//
+// 			'h75: btn_up      <= pressed; // up
+// 			'h72: btn_down    <= pressed; // down
+// 			'h6B: btn_left    <= pressed; // left
+// 			'h74: btn_right   <= pressed; // right
+// 			'h14: btn_fire    <= pressed; // ctrl
+// 			'h11: btn_fire2   <= pressed; // alt
+// 		endcase
+// 	end
+// end
+// CTL-2026-10-25: keyboard -> controllers.sv ctl_keyboard (same 13 keys; extended bit ignored = STD_EXT 0, as before).
+// Extra-key table: F2 (0x06, either extended form, level) -> kbx[0] = CPU-board self-test switch.
+// pause_cpu: no toggle keys here, so the keyboard behaves the same paused or not.
+wire        pause_cpu;   // CTL-2026-10-25: declared here (was in PAUSE SYSTEM below) so ctl_keyboard can take it
+wire [12:0] kb;
+wire  [0:0] kbx;
+ctl_keyboard #(.NX(1), .NXO(1), .XKEYS({24'h10_06_00})) keyboard
+	(.clk(CLK_SYS), .ps2_key(ps2_key), .pause(pause_cpu), .kb(kb), .kbx(kbx));
+wire btn_up       = kb[0];    // up
+wire btn_down     = kb[1];    // down
+wire btn_left     = kb[2];    // left
+wire btn_right    = kb[3];    // right
+wire btn_fire     = kb[4];    // ctrl
+wire btn_fire2    = kb[5];    // alt
+wire btn_1p_start = kb[6];    // 1
+wire btn_2p_start = kb[7];    // 2
+wire btn_coin1    = kb[8];    // 5
+wire btn_coin2    = kb[9];    // 6
+wire btn_service  = kb[10];   // 9  = SERVICE1 credit (MAME default key)
+wire btn_pause    = kb[12];   // P
+wire btn_selftest = kbx[0];   // F2 = CPU-board self-test switch (MAME default key)
 
 //////////////////  Arcade Buttons/Interfaces   ///////////////////////////
 
@@ -333,7 +355,7 @@ wire m_selftest = btn_selftest;
 wire m_pause    = btn_pause    | joystick_0[11];
 
 // PAUSE SYSTEM
-wire pause_cpu;
+// wire pause_cpu;   // CTL-2026-10-25: moved up to the keyboard block
 wire [23:0] rgb_out;
 pause #(8,8,8,49) pause
 (
