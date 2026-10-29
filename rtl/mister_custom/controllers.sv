@@ -36,6 +36,15 @@
 //    ctl_toggle     pause input; ctl_coin_impulse / ctl_paddle / ctl_pedal: PAUSE_MODE
 //  The v2 settings that absorb the cores' remaining local blocks (keyboard tables, port builders, pause forms) are
 //  in verilator/controllers/lint_cfg.sv, each proven against the core's own block by tb_keyboard_v2 / tb_port_map_v2.
+//  v3 (2026-10-27). Same rule: a v2 instantiation behaves bit-identically (tb_v1v2 at defaults).
+//    ctl_ad_stick   HOLD = 1: a released D-pad / button keeps the offset (MAME PORT_CENTERDELTA(0), e.g. a throttle)
+//  v5 (2026-10-28). Same rule: a v4 instantiation behaves bit-identically (tb_paddle / tb_v1v2 at defaults; tb_paddle_v5).
+//    ctl_paddle     axis_v = 1: the paddle moves vertically on screen (stick Y, D-pad up / down, mouse Y drive it);
+//                   rot = the game's MAME orientation: adds the geometric reverse when the paddle value follows the
+//                   native raster axis (ROT90: horizontal paddles, ROT270: vertical, ROT180: both). Pong core first.
+//  v4 (2026-10-27). Same rule: a v3 instantiation behaves bit-identically (tb_steer / tb_v1v2 at defaults).
+//    ctl_steer      RATE = 1: mode 1 analog stick / wheel X = turning SPEED (MAME: an absolute axis on a relative
+//                   IPT_DIAL port adds its value every frame); full lock = the D-pad rate x Sensitivity
 //
 //  PAUSE. Every module with a counter, ramp, timer or latch takes `pause` (connect the core's pause_cpu; tie 0 or leave
 //  it unconnected to ignore pause). The v2 rule, with pause connected (and PAUSE_MODE = 1 where the module has it):
@@ -625,11 +634,27 @@ module ctl_paddle #(parameter [7:0] PMIN = 8'h1D, parameter [7:0] PMAX = 8'hCB, 
     input       [7:0] stick_x,        // signed
     input             left,
     input             right,
+    // v5 (unconnected = v4): screen axis and game orientation
+    input  tri0       axis_v,         // 1 = the paddle moves vertically on screen: the next three replace stick_x /
+    input  tri0 [7:0] stick_y,        //     left / right / mouse_dx (down = increase, stick Y signed, down +)
+    input  tri0       up,
+    input  tri0       down,
+    input  tri0 [9:0] mouse_dy,       //     (ctl_mouse dy: down +)
+    input  tri0 [1:0] rot,            // 0 ROT0, 1 ROT90, 2 ROT180, 3 ROT270 (the paddle value follows the native axis)
 
     output      [7:0] pos
 );
 
 localparam [10:0] LO = {PMIN, 3'd0}, HI = {PMAX, 3'd0}, MID = {PCEN, 3'd0};
+
+// v5: the axis the player sees, and the reverse the rotation adds (CW: screen x = H - 1 - native y; CCW: screen
+// y = W - 1 - native x; 180: both)
+wire       geo_rev = axis_v ? (rot == 2'd3 || rot == 2'd2) : (rot == 2'd1 || rot == 2'd2);
+wire       rev     = reverse ^ geo_rev;
+wire [7:0] stk     = axis_v ? stick_y : stick_x;
+wire       dec     = axis_v ? up : left;
+wire       inc     = axis_v ? down : right;
+wire [9:0] mdx     = axis_v ? mouse_dy : mouse_dx;
 localparam [15:0] SPAN = {8'd0, PMAX - PMIN};
 
 // value * sensitivity in 1/8 counts
@@ -655,18 +680,18 @@ reg  [7:0] pad_d = 8'h80;
 reg [10:0] posq = MID;                               // position in 1/8 counts
 
 wire signed [9:0] spin_d  = (spinner[8] != spin_seen) ? $signed({{2{spinner[7]}}, spinner[7:0]}) : 10'sd0;
-wire signed [9:0] mouse_d = mouse_ev ? $signed(mouse_dx) : 10'sd0;
-wire signed [7:0] sx      = stick_x;
+wire signed [9:0] mouse_d = mouse_ev ? $signed(mdx) : 10'sd0;
+wire signed [7:0] sx      = stk;
 wire signed [9:0] sx_e    = {{2{sx[7]}}, sx};
-wire signed [9:0] frame_d = (sx > 8'sd12 || sx < -8'sd12) ? (sx_e >>> 4) : right ? 10'sd5 : left ? -10'sd5 : 10'sd0;
+wire signed [9:0] frame_d = (sx > 8'sd12 || sx < -8'sd12) ? (sx_e >>> 4) : inc ? 10'sd5 : dec ? -10'sd5 : 10'sd0;
 
 wire signed [15:0] d_q3 = (scale_q3(spin_d, sensitivity) >>> 1) + (scale_q3(mouse_d, sensitivity) >>> 1) +
                           (tick ? scale_q3(frame_d, sensitivity) : 16'sd0);
-wire signed [15:0] nxt  = $signed({5'd0, posq}) + (reverse ? -d_q3 : d_q3);
+wire signed [15:0] nxt  = $signed({5'd0, posq}) + (rev ? -d_q3 : d_q3);
 
 // absolute knob: 00-FF -> PMIN-PMAX
 /* verilator lint_off UNUSED */
-wire [15:0] knob  = {8'd0, reverse ? ~paddle : paddle} * SPAN;   // high byte used
+wire [15:0] knob  = {8'd0, rev ? ~paddle : paddle} * SPAN;   // high byte used
 /* verilator lint_on UNUSED */
 wire [10:0] abs_q = {(PMIN + knob[15:8]), 3'd0};
 
@@ -784,8 +809,11 @@ endmodule
 // Stick axis signed, + = right / down; inc = right / down, dec = left / up.
 // Pause: the D-pad offset (ramp and autocentre) freezes and continues on resume, so a D-pad released while paused
 //   recentres after resume; val keeps following the stick (level state). Same in v1.
+// HOLD (v3, default 0 = v2): 1 = no autocentre, a released D-pad / button leaves the offset where it is (MAME
+//   PORT_CENTERDELTA(0), e.g. Star Fire's throttle). The stick stays absolute: while it is outside +/-DZ it sets val
+//   and the offset returns to 0, as with HOLD = 0.
 //----------------------------------------------------------------------------
-module ctl_ad_stick #(parameter [6:0] DZ = 7'd4)
+module ctl_ad_stick #(parameter [6:0] DZ = 7'd4, parameter bit HOLD = 1'b0)
 (
     input        clk,
     input        reset,
@@ -819,7 +847,8 @@ function automatic signed [8:0] ramp(input signed [8:0] v, input up, input dn, i
     begin
         w  = {{2{v[8]}}, v};
         kk = $signed({3'd0, k});
-        n  = (up && !dn) ? w + kk : (dn && !up) ? w - kk : (w > kk) ? w - kk : (w < -kk) ? w + kk : 11'sd0;
+        n  = (up && !dn) ? w + kk : (dn && !up) ? w - kk : HOLD ? w :
+             (w > kk) ? w - kk : (w < -kk) ? w + kk : 11'sd0;
         ramp = (n > 11'sd128) ? 9'sd128 : (n < -11'sd128) ? -9'sd128 : n[8:0];
     end
 endfunction
@@ -844,11 +873,15 @@ endmodule
 // ABSOLUTE (the counter tracks the device, +-64 counts at full lock); mode 0 D-pad ramps 750 counts / s.
 // All feed one pending accumulator that moves steer_pos at most one count per tick (clk / 16384), so a
 // signed 8-bit delta read by the game never aliases. Sensitivity / direction as ctl_paddle.
+// RATE (v4, default 0 = v3): 1 = mode 1 stick X is a rate, not a position: each tick adds the dead-zoned deflection
+//   x Sensitivity, full lock = the D-pad ramp (2/8 count per tick at 1.0x), the fraction carried in rate_frac. A
+//   held stick keeps turning, as MAME feeds a stick to a dial; with RATE = 0 a held stick moves +-64 counts once.
+//   Paddle (mode 2) stays absolute.
 // Pause: steer_pos, the backlog and the tick divider hold; spinner / mouse / D-pad / wheel / paddle motion arriving
 //   while paused is discarded (the absolute target keeps tracking, so nothing jumps on resume); a backlog from before
 //   the pause keeps slewing after it. Same in v1.
 //----------------------------------------------------------------------------
-module ctl_steer
+module ctl_steer #(parameter bit RATE = 1'b0)
 (
     input        clk,
     input        reset,
@@ -896,7 +929,7 @@ wire signed [8:0] ana_raw = $signed({analog_x[7], analog_x});
 wire signed [8:0] pad_raw = $signed({1'b0, paddle}) - 9'sd128;
 wire signed [8:0] abs_raw = (mode == 2'd2) ? pad_raw :
                             ((ana_raw > 9'sd6) || (ana_raw < -9'sd6)) ? ana_raw : 9'sd0;
-wire              abs_on  = (mode == 2'd1) || (mode == 2'd2);
+wire              abs_on  = (mode == 2'd1 && !RATE) || (mode == 2'd2);
 wire signed [15:0] abs_tgt = abs_on ? (scale_q3({abs_raw[8], abs_raw}, sensitivity) >>> 1) : 16'sd0;
 reg  signed [15:0] abs_last = 16'sd0;
 
@@ -904,7 +937,11 @@ wire signed [15:0] pad_step = (mode == 2'd0 && (left ^ right)) ? (right ? 16'sd2
 
 wire signed [15:0] rel_q3  = scale_q3(spin_d, sensitivity) + (scale_q3(mouse_d, sensitivity) >>> 1);
 wire signed [15:0] abs_d   = abs_tgt - abs_last;
-wire signed [15:0] in_q3   = rel_q3 + (tick ? pad_step : 16'sd0) + abs_d;
+reg  signed [15:0] rate_frac = 16'sd0;                // RATE: Q3 x 512 residue of the stick rate
+wire signed [15:0] rate_in  = (RATE && mode == 2'd1) ? scale_q3({abs_raw[8], abs_raw}, sensitivity) : 16'sd0;
+wire signed [15:0] rate_sum = rate_frac + rate_in;
+wire signed [15:0] rate_q3  = rate_sum >>> 9;        // +-2 Q3 per tick at full lock, 1.0x
+wire signed [15:0] in_q3   = rel_q3 + (tick ? pad_step + rate_q3 : 16'sd0) + abs_d;
 wire signed [15:0] dir_q3  = reverse ? -in_q3 : in_q3;
 
 reg  signed [15:0] pending = 16'sd0;
@@ -913,6 +950,9 @@ localparam signed [15:0] PEND_MAX = 16'sd2048;        // +-256 counts backlog
 
 reg  [1:0] mode_q = 2'd0;
 reg        rev_q  = 1'b0;
+always @(posedge clk)
+    if (reset || mode != mode_q || reverse != rev_q) rate_frac <= 16'sd0;
+    else if (tick) rate_frac <= rate_sum - (rate_q3 <<< 9);
 
 always @(posedge clk) begin
     spin_seen <= spinner[8];

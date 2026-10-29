@@ -1,23 +1,4 @@
-//============================================================================
-// SP0250 internal coefficient ROM (clocked, 2-cycle latency).
-//
-// 128-entry table of LPC filter coefficient magnitudes, lifted verbatim from
-// MAME sp0250.cpp:122-129 (Olivier Galibert, BSD-3-Clause). These values are
-// hardware-verified and not published in the GI SP0250 datasheet — do not
-// "round" or "optimize" them.
-//
-// Byte layout (from MAME sp0250_gc):
-//   idx[6:0] = 7-bit magnitude index into COEFS[]
-//   idx[7]   = sign bit. bit7 SET  -> positive magnitude
-//                        bit7 CLEAR -> negative magnitude (-mag)
-//
-// This module is clocked so Quartus can infer an M10K block ROM (~1280 bits).
-// The previous combinational form got instantiated 12 times in sp0250.sv and
-// blew the Cyclone V ALM budget. sp0250.sv now walks a single instance over
-// 14 cycles in ST_COEF_LOAD.
-//
-// Latency: idx at cycle N -> val valid at cycle N+2.
-//============================================================================
+//  Coefficients from MAME sp0250.cpp (Olivier Galibert, BSD-3-Clause)
 
 module sp0250_coef_rom (
     input                     clk,

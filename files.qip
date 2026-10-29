@@ -1,22 +1,23 @@
 set_global_assignment -name VHDL_INPUT_VERSION VHDL_2008
 
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/tb_astrob.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/chip_pool_pkg.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/ram_pool_pkg.sv
 
 set_global_assignment -name SYSTEMVERILOG_FILE Arcade-SegaG80.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/SegaG80.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/SegaG80_CPU.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/astrob_audio.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/spaceod_audio.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/sindbadm_audio.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/segag80_decrypt.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/segag80_5028.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/segag80_video.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/segag80_bg.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/segag80_spaceod_bg.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/segag80_vtg.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/segag80_dispatcher.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/g80r/g80r_board.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/g80r/SegaG80_CPU.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/g80r/sound/astrob_audio.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/g80r/sound/spaceod_audio.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/g80r/sound/sindbadm_audio.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/g80r/segag80_decrypt.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/g80r/segag80_5028.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/g80r/segag80_video.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/g80r/segag80_bg.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/g80r/segag80_spaceod_bg.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/g80r/segag80_vtg.sv
 set_global_assignment -name VERILOG_FILE       rtl/mister_custom/pause.v
 set_global_assignment -name VERILOG_FILE       rtl/mister_custom/hiscore.v
-# CTL-2026-10-25: shared input library (controllers.sv v2)
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/mister_custom/controllers.sv
 set_global_assignment -name VHDL_File          rtl/cpu/T80/T80.vhd
 set_global_assignment -name VHDL_File          rtl/cpu/T80/T80s.vhd
@@ -24,64 +25,31 @@ set_global_assignment -name VHDL_File          rtl/cpu/T80/T80_Pack.vhd
 set_global_assignment -name VHDL_File          rtl/cpu/T80/T80_MCode.vhd
 set_global_assignment -name VHDL_File          rtl/cpu/T80/T80_ALU.vhd
 set_global_assignment -name VHDL_File          rtl/cpu/T80/T80_Reg.vhd
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/ram_rom/segag80_rom.sv
-# DPRAMSV-2026-10-25: VHDL dpram_dc replaced by the SystemVerilog one (same ports/generics + byteena); original:
-# set_global_assignment -name VHDL_FILE          rtl/ram_rom/dpram_dc.vhd
 set_global_assignment -name SYSTEMVERILOG_FILE          rtl/ram_rom/dpram_dc.sv
-# spram.vhd never existed at this path — the line was dangling. Replaced with
-# the generic single-port RAM (Jim Gregory, GPLv3) that i8035.v instantiates.
 set_global_assignment -name VERILOG_FILE       rtl/ram_rom/spram.v
 
-# --- MCS-48 / 8035 core (T48 v1.4, SVN r295) + Sega 8035 toplevel wrapper -----
-# MIGRATE-2026-05-28 (Juno First playbook): switched from the locally-refactored
-# rtl/sound/t48/ tree to the pristine rtl/sound/i8039/ tree -- same T48 v1.4 /
-# SVN r295, but the component-instantiation source that Juno First already ships
-# and runs on this toolchain. Pulled in as one QIP include exactly like JF
-# (jf_sound.qip). This drops the LAST reference to rtl/sound/t48/, so that whole
-# tree is now safe to delete.
-#   NOTE: the i8039/ tree REQUIRES t48_comp_pack-p.vhd (component decls) -- the
-#   old t48/ build omitted it only because that tree used direct-entity
-#   instantiation. i8039.qip lists it. segaspeech.sv instantiates
-#   t8039_notri_extrom (8035, 64-byte RAM).
 set_global_assignment -name QIP_FILE rtl/sound/i8039/i8039.qip
 
-# --- SP0250 LPC speech core (port of MAME sp0250.cpp, BSD-3-Clause) ---
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/sp0250/sp0250_coef_rom.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/sp0250/sp0250.sv
 
-# --- Sega speech board wrapper (8035 + SP0250 + latch + CD4053 gate) ---
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/segaspeech/segaspeech.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/g80r/sound/segaspeech/segaspeech.sv
 
-# --- Sega Universal Sound Board (drawing 800-0377) — Pig Newton -------------
-# Imported from the Arcade-SegaG80V core (GPLv3). i8035.v wraps the T48
-# t48_core already present in rtl/sound/i8039/, so that tree is NOT duplicated.
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/usb/usb_timer.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/usb/usb_noise.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/usb/usb_filter.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/usb/sega_usb.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/monsterb/monsterb_voice.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/g80r/sound/usb/usb_timer.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/g80r/sound/usb/usb_noise.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/g80r/sound/usb/usb_filter.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/g80r/sound/usb/sega_usb.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/g80r/sound/monsterb/monsterb_voice.sv
 set_global_assignment -name VERILOG_FILE       rtl/sound/usb/i8035.v
 
-# --- Speech board ROM loaders ---
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/ram_rom/speech_cpu_rom.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/ram_rom/speech_data_rom.sv
-# --- Sindbad Mystery sound board (Sega System 1: Z80 + 2x SN76496) ----------
-# JT89 (Jose Tejada, GPLv3) is the SN76489/SN76496 core; the verilog QIP is the
-# .v flavour, so no VHDL_2008 mixing. T80s is already listed above.
 set_global_assignment -name QIP_FILE rtl/sound/jt89/syn/quartus/jt89_verilog.qip
 
-# --- TMS36XX organ tone generator (port of MAME sound/tms36xx.cpp) ----------
-# Reusable: TMS3617 (Monster Bash) and TMS3615 (Naughty Boy / Pleiads).
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/tms36xx.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/monsterb/monsterb_music.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/g80r/sound/monsterb/monsterb_music.sv
 
-# --- 005 discrete sound board (Sega 834-0130) -------------------------------
-# Melody chain (2716 tune ROM + 6331 divisor PROM, both MRA-loaded) plus the
-# seven effect voices, all synthesized from the schematic. MAME plays the
-# effects as WAV samples; nothing here needs sample data.
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/005/svf.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/005/mm5837_noise.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/005/i8255_mode0.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/005/melody_gen.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/005/fx_bank.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/005/sega005_audio.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/g80r/sound/005/svf.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/g80r/sound/005/mm5837_noise.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/g80r/sound/005/i8255_mode0.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/g80r/sound/005/melody_gen.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/g80r/sound/005/fx_bank.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/g80r/sound/005/sega005_audio.sv
