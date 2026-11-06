@@ -427,7 +427,7 @@ monsterb_music #(.CLK_HZ(15_468_480)) mb_music_inst (
     .port_a_din  (mb_music_din),
     .ioctl_addr  (ioctl_addr[4:0]),
     .ioctl_data  (ioctl_data),
-    .ioctl_wr    (ioctl_wr & (ioctl_index == 8'd4)),
+    .ioctl_wr    (ioctl_wr & (ioctl_index == 8'd12)),
     .audio       (mb_music_sample)
 );
 

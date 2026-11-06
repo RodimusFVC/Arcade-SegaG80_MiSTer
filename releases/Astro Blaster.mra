@@ -8,7 +8,7 @@
     <platform>Sega G-80 Raster</platform>
     <series>Astro Blaster</series>
     <year>1981</year>
-    <manufacturer>Sega / Gremlin</manufacturer>
+    <manufacturer>Sega</manufacturer>
     <category>Shooter</category>
 
     <setname>astrob</setname>
@@ -17,27 +17,22 @@
     <rbf>SegaG80</rbf>
     <about></about>
 
-    <buttons names="Shoot,Warp,-,-,Coin,Start 1P,Start 2P,Pause" default="A,B,Select,Start,R,L"/>
-
-    <!-- Index 1: Config -->
-    <rom index="1"><part>00</part></rom>
-
     <resolution>15kHz</resolution>
     <rotation>vertical (ccw)</rotation>
     <flip>no</flip>
 
     <players>2 (alternating)</players>
-    <joystick>4-way</joystick>
+    <joystick>2-way</joystick>
     <special_controls></special_controls>
     <num_buttons>2</num_buttons>
-    <button_names>Fire,Warp</button_names>
+    <buttons names="Shoot,Warp,-,-,Coin,Start 1P,Start 2P,Pause,-,-,-" default="A,B,Select,Start,R,L"/>
 
-    <switches default="F5 33">
-        <dip bits="0,1"   name="Lives"        ids="2,3,4,5"/>
-        <dip bits="2"     name="Cabinet"      ids="Cocktail,Upright"/>
-        <dip bits="3"     name="Demo Speech"  ids="On,Off"/>
-        <dip bits="8,11"  name="Coin A"       ids="4C/1C,3C/1C,2C/1C,1C/1C,1C/2C,1C/3C,1C/4C,1C/5C,1C/6C,2C/1C 5/3 6/4,2C/1C 4/3,1C/1C 5/6,1C/1C 4/5,1C/1C 2/3,1C/2C 5/11,1C/2C 4/9"/>
-        <dip bits="12,15" name="Coin B"       ids="4C/1C,3C/1C,2C/1C,1C/1C,1C/2C,1C/3C,1C/4C,1C/5C,1C/6C,2C/1C 5/3 6/4,2C/1C 4/3,1C/1C 5/6,1C/1C 4/5,1C/1C 2/3,1C/2C 5/11,1C/2C 4/9"/>
+    <switches default="F5,33">
+        <dip name="Lives" bits="0,1" ids="2,3,4,5"/>
+        <dip name="Cabinet" bits="2" ids="Upright,Cocktail" values="1,0"/>
+        <dip name="Demo Speech" bits="3" ids="Off,On" values="1,0"/>
+        <dip name="Coin A" bits="8,11" ids="4C/1C,3C/1C,2C/1C,2 Coins/1 Credit 5/3 6/4,2 Coins/1 Credit 4/3,1C/1C,1 Coin/1 Credit 5/6,1 Coin/1 Credit 4/5,1 Coin/1 Credit 2/3,1C/2C,1 Coin/2 Credits 5/11,1 Coin/2 Credits 4/9,1C/3C,1C/4C,1C/5C,1C/6C" values="0,1,2,9,10,3,11,12,13,4,14,15,5,6,7,8"/>
+        <dip name="Coin B" bits="12,15" ids="4C/1C,3C/1C,2C/1C,2 Coins/1 Credit 5/3 6/4,2 Coins/1 Credit 4/3,1C/1C,1 Coin/1 Credit 5/6,1 Coin/1 Credit 4/5,1 Coin/1 Credit 2/3,1C/2C,1 Coin/2 Credits 5/11,1 Coin/2 Credits 4/9,1C/3C,1C/4C,1C/5C,1C/6C" values="0,1,2,9,10,3,11,12,13,4,14,15,5,6,7,8"/>
     </switches>
 
     <!-- Index 0: ROM -->
@@ -70,25 +65,43 @@
         <part crc="5988c767" name="808b.speech-u7"/>
     </rom>
 
-    <!-- Index 3: ROM -->
-    <rom index="3" md5="none" zip="astrob.zip">
+    <!-- Index 1: Config -->
+    <rom index="1">
+        <part>
+            00 14 00 00 FF FF F5 33 00 FE 80 80 00 01 80 80
+            11 00 00 00 12 00 00 00 16 13 03 05 00 14 04 06
+            00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+            00 00 00 00 0E 0D 0C 0B 16 00 00 00 00 00 00 00
+        </part>
+    </rom>
+
+    <!-- Index 11: ROM -->
+    <rom index="11" md5="none" zip="astrob.zip">
         <part crc="893f228d" name="809a.speech-u6"/>
         <part crc="ff0163c5" name="810.speech-u5"/>
         <part crc="219f3978" name="811.speech-u4"/>
         <part crc="410ad0d2" name="812a.speech-u3"/>
     </rom>
 
-    <!-- Index 4: ROM -->
-    <rom index="4" md5="none" zip="astrob.zip">
+    <!-- Index 12: ROM -->
+    <rom index="12" md5="none" zip="astrob.zip">
         <part crc="358128b6" name="316-0806.video1-u52"/>
         <part repeat="0x3E0">FF</part>
         <part crc="c609b79e" name="316-0764.cpu-u15"/>
     </rom>
 
-    <!-- Index 5: Reserved -->
-    <rom index="5" md5="none"></rom>
-    <!-- Index 6: Reserved -->
-    <rom index="6"></rom>
+    <!-- Index 3: Hiscore -->
+    <rom index="3" md5="none">
+        <part>
+            00 0B CD 30 00 FF 00 02 00 02 00 01 11 11 00 00
+            00 00 CB 3F 00 F6 00 00
+            00 00 CC 18 00 01 5C 5C
+        </part>
+    </rom>
+    <!-- Index 4: NVRAM -->
+    <rom index="4"></rom>
+    <nvram index="4" size="247"></nvram>
 
-    <mratimestamp>20260418000000</mratimestamp>
+    <remark>Astro Blaster (Version 3) (Sega)</remark>
+    <mratimestamp>20261105000000</mratimestamp>
 </misterromdescription>

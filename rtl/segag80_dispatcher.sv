@@ -132,7 +132,7 @@ endgenerate
 /////////////////////////////  Shared ROM blocks  /////////////////////////////
 
 //   rom0  48K  index 0 < $C000   program ROM (32K + 16K blocks)      rom1   2K  index 2  speech 8035 program
-//   rom2   8K  index 3           speech data                         rom3  32K  index 8  bg board tilemap
+//   rom2   8K  index 11          speech data                         rom3  32K  index 8  bg board tilemap
 //   rom4/5 8K  index 7 bit 13 0/1 bg board tile planes 0 / 1          rom6  16K  index 8  Space Odyssey tilemap
 //   rom7  6x4K index 7 [14:12]   Space Odyssey tile planes 0-5        rom8   8K  index 6  Sindbad sound program
 //   rom9   2K  index 5           005 tune ROM                        rom10  32B index 10 005 divisor PROM
@@ -168,7 +168,7 @@ dpram_dc #(.widthad_a(11)) rom1 (
     .clock_b(clk_sys), .address_b(rom1_a), .data_b(8'd0), .wren_b(1'b0), .q_b(rom1_d)
 );
 dpram_dc #(.widthad_a(13)) rom2 (
-    .clock_a(clk_sys), .address_a(ioctl_addr[12:0]), .data_a(ioctl_data), .wren_a(ioctl_wr & (ioctl_index == 8'd3)), .q_a(),
+    .clock_a(clk_sys), .address_a(ioctl_addr[12:0]), .data_a(ioctl_data), .wren_a(ioctl_wr & (ioctl_index == 8'd11)), .q_a(),
     .clock_b(clk_sys), .address_b(rom2_a), .data_b(8'd0), .wren_b(1'b0), .q_b(rom2_d)
 );
 dpram_dc #(.widthad_a(15)) rom3 (

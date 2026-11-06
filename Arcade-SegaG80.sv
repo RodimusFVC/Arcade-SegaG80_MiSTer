@@ -56,6 +56,19 @@ assign AUDIO_MIX = 0;
 
 wire [127:0] status;
 wire        ioctl_download;
+wire        CLK_SYS;
+wire        CLK_VID;
+wire        locked;
+wire [63:0] reconfig_to_pll;
+wire [63:0] reconfig_from_pll;
+wire [15:0] hs_address;
+wire  [7:0] hs_data_in;
+wire  [7:0] hs_data_out;
+wire        hs_write_enable;
+wire        hs_access_read;
+wire        hs_access_write;
+wire        hs_pause;
+wire        hs_configured;
 assign LED_DISK  = 0;
 assign LED_POWER = 0;
 assign LED_USER  = ioctl_download;
@@ -78,10 +91,12 @@ localparam CONF_STR = {
 	"P1O36,H Center,0,+1,+2,+3,+4,+5,+6,+7,-8,-7,-6,-5,-4,-3,-2,-1;",
 	"P1O7A,V Center,0,+1,+2,+3,+4,+5,+6,+7,-8,-7,-6,-5,-4,-3,-2,-1;",
 	"-;",
-	"H1OR,Autosave Hiscores,Off,On;",
 	"P2,Pause Options;",
 	"P2OP,Pause when OSD is open,On,Off;",
 	"P2OQ,Dim video after 10s,On,Off;",
+	"-;",
+	"H1P3,High Score Options;",
+	"H1P3OL,Autosave Hiscores,Off,On;",
 	"-;",
 	"DIP;",
 	"-;",
@@ -137,10 +152,6 @@ hps_io #(.CONF_STR(CONF_STR)) hps_io
 	.ps2_key(ps2_key)
 );
 
-wire CLK_SYS;
-wire CLK_VID;
-wire locked;
-
 pll pll
 (
 	.refclk(CLK_50M),
@@ -152,8 +163,6 @@ pll pll
 	.locked(locked)
 );
 
-wire [63:0] reconfig_to_pll;
-wire [63:0] reconfig_from_pll;
 wire        cfg_waitrequest;
 wire        cfg_write;
 wire  [5:0] cfg_address;
@@ -342,22 +351,34 @@ segag80_dispatcher g80_inst
 	.hs_write    (hs_write_enable)
 );
 
-wire [15:0]hs_address;
-wire [7:0] hs_data_in;
-wire [7:0] hs_data_out;
-wire hs_write_enable;
-wire hs_access_read;
-wire hs_access_write;
-wire hs_pause;
-wire hs_configured;
+// Hiscore: RAM pool block 0 port B (main work RAM), separate from the Z80's port A, so the CPU is never held
+// (hiscore.pause_cpu unconnected, pause_request 0). Config = MRA index 3, dump = index 4. OSD_STATUS is gated by
+// run_d so the OSD-open extract can't copy RAM that is still being downloaded / reset over the saved scores.
+assign hs_pause = 1'b0;
 
-assign hs_pause        = 1'b0;
-assign hs_write_enable = 1'b0;
-assign hs_access_read  = 1'b0;
-assign hs_access_write = 1'b0;
-assign hs_configured   = 1'b0;
-assign hs_address      = 16'd0;
-assign hs_data_in      = 8'd0;
-assign ioctl_din       = 8'd0;
+reg [1:0] run_d;
+always @(posedge CLK_SYS) run_d <= {run_d[0], ~reset};
+
+hiscore #(
+	.HS_ADDRESSWIDTH(16),
+	.CFG_ADDRESSWIDTH(4),
+	.CFG_LENGTHWIDTH(2)
+) hi (
+	.*,
+	.clk(CLK_SYS),
+	.paused(pause_cpu),
+	.autosave(status[21]),
+	.OSD_STATUS(OSD_STATUS & run_d[1]),
+	.ram_address(hs_address),
+	.data_from_ram(hs_data_out),
+	.data_to_ram(hs_data_in),
+	.data_from_hps(ioctl_dout),
+	.data_to_hps(ioctl_din),
+	.ram_write(hs_write_enable),
+	.ram_intent_read(hs_access_read),
+	.ram_intent_write(hs_access_write),
+	.pause_cpu(),
+	.configured(hs_configured)
+);
 
 endmodule
