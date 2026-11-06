@@ -431,7 +431,7 @@ monsterb_music #(.CLK_HZ(15_468_480)) mb_music_inst (
     .audio       (mb_music_sample)
 );
 
-localparam SM_GAIN_LOG2 = 4;
+localparam SM_GAIN_LOG2 = 4;   // sn76489sv unipolar sum 0..2040 << 4 = 0..32640
 
 wire signed [15:0] sindbadm_sample;
 

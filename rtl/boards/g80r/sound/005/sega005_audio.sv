@@ -1,4 +1,4 @@
-//  Melody chain based on MAME segag80r_a.cpp (Aaron Giles, BSD-3-Clause); voices from the board schematic
+// Based on MAME segag80r_a.cpp (Aaron Giles, BSD-3-Clause)
 
 `default_nettype none
 

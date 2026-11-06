@@ -105,8 +105,8 @@ module sindbadm_sound #(
     assign rom8_a = addr[12:0];
     wire [7:0] rom_q = rom8_d;
 
-    assign ram_pr_i = '{a_addr: {4'd0, addr[10:0]}, a_d: dout, a_we: ram_sel & mem_wr & ce_z80,
-                        b_addr: 15'd0, b_d: 8'd0, b_we: 1'b0};
+    assign ram_pr_i = '{a_addr: {5'd0, addr[10:0]}, a_d: dout, a_we: ram_sel & mem_wr & ce_z80,
+                        b_addr: 16'd0, b_d: 8'd0, b_we: 1'b0};
     wire [7:0] ram_q = ram_pr_o.a_q;
 
     always @(*) begin
@@ -149,6 +149,8 @@ module sindbadm_sound #(
     wire signed [11:0] sn_sum = $signed({sn0_snd[10], sn0_snd})
                               + $signed({sn1_snd[10], sn1_snd});
 
+    // sn76489sv is the real chip's unipolar level (0..1020 per chip, 0 when silent): the two-chip sum 0..2040 << 4 =
+    // 0..32640, silence = 0 (no DC at rest; MiSTer's audio_out DC blocker plays the coupling capacitor).
     wire signed [15:0] sn_wide = {{4{sn_sum[11]}}, sn_sum};
     assign audio = sn_wide <<< GAIN_LOG2;
 

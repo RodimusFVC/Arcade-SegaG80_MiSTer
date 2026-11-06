@@ -48,23 +48,23 @@ chip_pool_pkg::z80_i_t z80_0_i, z80_1_i;
 chip_pool_pkg::z80_o_t z80_0_o, z80_1_o;
 
 /* verilator lint_off PINCONNECTEMPTY */
-T80s z80_0 (
+t80sv_T80s z80_0 (
     .RESET_n(~reset), .CLK(clk_sys), .CEN(z80_0_i.ce), .WAIT_n(1'b1), .INT_n(z80_0_i.int_n), .NMI_n(z80_0_i.nmi_n),
     .BUSRQ_n(1'b1), .M1_n(z80_0_o.m1_n), .MREQ_n(z80_0_o.mreq_n), .IORQ_n(z80_0_o.iorq_n), .RD_n(z80_0_o.rd_n),
     .WR_n(z80_0_o.wr_n), .RFSH_n(z80_0_o.rfsh_n), .HALT_n(), .BUSAK_n(), .A(z80_0_o.a), .DI(z80_0_i.di), .DO(z80_0_o.dout)
 );
 
-T80s z80_1 (
+t80sv_T80s z80_1 (
     .RESET_n(~reset), .CLK(clk_sys), .CEN(z80_1_i.ce), .WAIT_n(1'b1), .INT_n(z80_1_i.int_n), .NMI_n(z80_1_i.nmi_n),
     .BUSRQ_n(1'b1), .M1_n(z80_1_o.m1_n), .MREQ_n(z80_1_o.mreq_n), .IORQ_n(z80_1_o.iorq_n), .RD_n(z80_1_o.rd_n),
     .WR_n(z80_1_o.wr_n), .RFSH_n(z80_1_o.rfsh_n), .HALT_n(), .BUSAK_n(), .A(z80_1_o.a), .DI(z80_1_i.di), .DO(z80_1_o.dout)
 );
 
-// 8035 (stock T48 t8039_notri_extrom, gate_port_input_g 0, 64-byte RAM, EA 0): mcs48_0: Astro Blaster speech board.
+// 8035 (t48sv t8039_notri_extrom, gate_port_input_g 0, 64-byte RAM, EA 0): mcs48_0: Astro Blaster speech board.
 chip_pool_pkg::mcs48_i_t mcs48_0_i;
 chip_pool_pkg::mcs48_o_t mcs48_0_o;
 
-t8039_notri_extrom #(.gate_port_input_g(0), .ram_addr_width_g(6)) mcs48_0 (
+t48sv_t8039_notri_extrom #(.gate_port_input_g(0), .ram_addr_width_g(6)) mcs48_0 (
     .xtal_i(clk_sys), .xtal_en_i(mcs48_0_i.xtal_en), .reset_n_i(mcs48_0_i.reset_n), .t0_i(mcs48_0_i.t0), .t0_o(),
     .t0_dir_o(), .int_n_i(mcs48_0_i.int_n), .ea_i(1'b0), .rd_n_o(mcs48_0_o.rd_n), .psen_n_o(), .wr_n_o(mcs48_0_o.wr_n),
     .ale_o(mcs48_0_o.ale), .db_i(mcs48_0_i.db), .db_o(mcs48_0_o.db), .db_dir_o(mcs48_0_o.db_dir), .t1_i(mcs48_0_i.t1),
@@ -72,15 +72,18 @@ t8039_notri_extrom #(.gate_port_input_g(0), .ram_addr_width_g(6)) mcs48_0 (
     .p1_o(mcs48_0_o.p1), .p1_low_imp_o(), .prog_n_o(), .pmem_addr_o(mcs48_0_o.pmem_a), .pmem_data_i(mcs48_0_i.pmem_d)
 );
 
-// 8035 through i8035.v (bare t48_core): i8035_0: Pig Newton sound board CPU / Monster Bash uPD7751 (never together).
+// 8035 (t48sv t8039_notri_extrom, gate_port_input_g 0, 64-byte RAM, EA from the board, program over the bus):
+// i8035_0: Pig Newton sound board CPU / Monster Bash uPD7751 (never together). Same core use as the old i8035.v.
 chip_pool_pkg::i8035_i_t i8035_0_i;
 chip_pool_pkg::i8035_o_t i8035_0_o;
 
-i8035 i8035_0 (
-    .clk(clk_sys), .ce(i8035_0_i.ce), .I_RSTn(i8035_0_i.rst_n), .I_INTn(i8035_0_i.int_n), .I_EA(i8035_0_i.ea),
-    .O_PSENn(i8035_0_o.psen_n), .O_RDn(i8035_0_o.rd_n), .O_WRn(i8035_0_o.wr_n), .O_ALE(i8035_0_o.ale),
-    .O_PROGn(i8035_0_o.prog_n), .I_T0(i8035_0_i.t0), .O_T0(i8035_0_o.t0), .I_T1(i8035_0_i.t1), .I_DB(i8035_0_i.db),
-    .O_DB(i8035_0_o.db), .I_P1(i8035_0_i.p1), .O_P1(i8035_0_o.p1), .I_P2(i8035_0_i.p2), .O_P2(i8035_0_o.p2)
+t48sv_t8039_notri_extrom #(.gate_port_input_g(0), .ram_addr_width_g(6)) i8035_0 (
+    .xtal_i(clk_sys), .xtal_en_i(i8035_0_i.ce), .reset_n_i(i8035_0_i.rst_n), .t0_i(i8035_0_i.t0), .t0_o(i8035_0_o.t0),
+    .t0_dir_o(), .int_n_i(i8035_0_i.int_n), .ea_i(i8035_0_i.ea), .rd_n_o(i8035_0_o.rd_n), .psen_n_o(i8035_0_o.psen_n),
+    .wr_n_o(i8035_0_o.wr_n), .ale_o(i8035_0_o.ale), .db_i(i8035_0_i.db), .db_o(i8035_0_o.db), .db_dir_o(),
+    .t1_i(i8035_0_i.t1), .p2_i(i8035_0_i.p2), .p2_o(i8035_0_o.p2), .p2l_low_imp_o(), .p2h_low_imp_o(),
+    .p1_i(i8035_0_i.p1), .p1_o(i8035_0_o.p1), .p1_low_imp_o(), .prog_n_o(i8035_0_o.prog_n), .pmem_addr_o(),
+    .pmem_data_i(8'h00)
 );
 
 // SP0250 (ours): sp0250_0: Astro Blaster speech board.
@@ -93,7 +96,7 @@ sp0250 sp0250_0 (
     .audio_valid(sp0250_0_o.audio_valid)
 );
 
-// TMS36XX (rtl/sound/tms36xx.sv, master): tms36xx_0: Monster Bash TMS3617 (parameter set A; cfg_b, tunes unused).
+// TMS36XX (rtl/rodimus/tms36xx/tms36xx.sv, master): tms36xx_0: Monster Bash TMS3617 (parameter set A; cfg_b, tunes unused).
 chip_pool_pkg::tms36xx_i_t tms36xx_0_i;
 chip_pool_pkg::tms36xx_o_t tms36xx_0_o;
 
@@ -111,14 +114,15 @@ tms36xx #(.CLK_HZ(15_468_480), .BASEFREQ(247),
 );
 assign tms36xx_0_o.audio = tms36xx_0_audio; assign tms36xx_0_o.ce_snd = tms36xx_0_ce;
 
+// SN76489 pool: 2x sn76489sv, VARIANT 2 = SN76496 (17-bit LFSR, period 0 = 0x400; Sindbad Mystery); output unipolar 0..1020
 chip_pool_pkg::sn76489_i_t [1:0] sn76489_i;
 chip_pool_pkg::sn76489_o_t [1:0] sn76489_o;
 
 genvar sn;
 generate
     for (sn = 0; sn < 2; sn++) begin : g_sn76489
-        jt89 sn76489 (
-            .rst(sn76489_i[sn].rst), .clk(clk_sys), .clk_en(sn76489_i[sn].ce), .wr_n(sn76489_i[sn].wr_n),
+        sn76489sv #(.VARIANT(2)) sn76489 (
+            .rst(sn76489_i[sn].rst), .clk(clk_sys), .ce(sn76489_i[sn].ce), .wr_n(sn76489_i[sn].wr_n),
             .cs_n(sn76489_i[sn].cs_n), .din(sn76489_i[sn].din), .sound(sn76489_o[sn].sound), .ready(sn76489_o[sn].ready)
         );
     end

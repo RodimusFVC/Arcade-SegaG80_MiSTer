@@ -162,10 +162,10 @@ module sega_usb #(
 	end
 	wire movx_wr = ce_cpu && wr_n && !wr_n_d;
 
-	assign pgm_pr_i  = '{a_addr: {3'd0, pgm_addr}, a_d: pgm_din, a_we: pgm_wr_en, b_addr: {3'd0, cpu_pc}, b_d: 8'd0, b_we: 1'b0};
+	assign pgm_pr_i  = '{a_addr: {4'd0, pgm_addr}, a_d: pgm_din, a_we: pgm_wr_en, b_addr: {4'd0, cpu_pc}, b_d: 8'd0, b_we: 1'b0};
 	assign pgm_dout  = pgm_pr_o.a_q;
 	assign pgm_q     = pgm_pr_o.b_q;
-	assign work_pr_i = '{a_addr: {5'd0, work_addr}, a_d: wr_data, a_we: movx_wr & ~reset, b_addr: 15'd0, b_d: 8'd0, b_we: 1'b0};
+	assign work_pr_i = '{a_addr: {6'd0, work_addr}, a_d: wr_data, a_we: movx_wr & ~reset, b_addr: 16'd0, b_d: 8'd0, b_we: 1'b0};
 	assign work_q    = work_pr_o.a_q;
 
 	logic [7:0] env [0:2][0:2];

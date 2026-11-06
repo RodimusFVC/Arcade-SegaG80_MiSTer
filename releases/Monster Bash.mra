@@ -17,10 +17,9 @@
     <rbf>SegaG80</rbf>
     <about></about>
 
-    <buttons names="Fire,Not Used,Not Used,Not Used,Coin,Start 1P,Start 2P,Pause" default="A,B,X,Y,Select,Start,R,L"/>
+    <buttons names="Fire,-,-,-,Coin,Start 1P,Start 2P,Pause" default="A,Select,Start,R,L"/>
 
-    <!-- Index 1: Game ID byte — MUST appear before index 0 in MRA.
-         0x01 = Monster Bash (315-0082 security chip). -->
+    <!-- Index 1: Config -->
     <rom index="1"><part>01</part></rom>
 
     <resolution>15kHz</resolution>
@@ -33,43 +32,6 @@
     <num_buttons>1</num_buttons>
     <button_names>Fire</button_names>
 
-    <!--
-      DIP layout (MAME segag80r.cpp:843-884 + g80r_generic at 631-710)
-
-      Byte 0 (dip_sw0, D3D2 = SW1):
-        bit 0..1  Lives          SW1:8,7  (00=3*, 10=4, 01=5, 11=6)
-        bit 2     Cabinet        SW1:6    (0=Cocktail, 1=Upright*)
-        bit 3..4  Difficulty     SW1:5,4  (00=Easy, 10=Medium*, 01=Hard, 11=Hardest)
-        bit 5..6  Bonus Life     SW1:3,2  (10=10000, 01=20000*, 11=40000, 00=None)
-          NOTE: MAME PORT_DIPNAME( 0x60, 0x40, ...) → default 0x40 = bits[6:5]=10 → 20000
-        bit 7     Infinite Lives SW1:1    (0=On, 1=Off*)
-
-      Byte 1 (dip_sw1, D1D0 = SW2):
-        bit 0..3  Coin A     SW2:8..5
-        bit 4..7  Coin B     SW2:4..1
-
-      Factory default: D4 33
-        D4 = 1101 0100
-             |||| ||+-- Lives bit0 = 0
-             |||| |+--- Lives bit1 = 0  → Lives = 00 = 3
-             |||| +---- Cabinet = 1     → Upright
-             |||+------ Difficulty bit0 = 0
-             ||+------- Difficulty bit1 = 1 → Medium
-             |+-------- Bonus bit0 = 0
-             +--------- Bonus bit1 = 1  → 20000 (bit6=1, bit5=0 → 0x40)
-                        (bit7 not shown above, = 1 for Inf Off)
-        Recomputing: bit7=1,bit6=1,bit5=0,bit4=1,bit3=0,bit2=1,bit1=0,bit0=0 = 0xD4
-        33 = 0011 0011  → 1C/1C both coins
-
-      NOTE (1): GAME_ID blocker — current RBF has GAME_ID=0 (315-0062/ASTROB) hardwired.
-      Monster Bash requires 315-0082 security chip (GAME_ID=1 per SegaG80.sv, but not yet
-      wired in SegaG80_CPU.sv). Core change needed before this game can decrypt correctly.
-
-      NOTE (2): Background board ROMs (gfx1, gfx2) and sound board ROMs (7751, UPD7751)
-      not loaded — RTL has no Monster Bash background or sound board support yet.
-      Monster Bash also uses an 8255 PPI for sound control (main_ppi8255_portmap),
-      different from Astro Blaster's direct port writes.
-    -->
     <switches default="D4 33">
         <dip bits="0,1"   name="Lives"        ids="3,5,4,6"/>
         <dip bits="2"     name="Cabinet"      ids="Cocktail,Upright"/>
@@ -80,9 +42,7 @@
         <dip bits="12,15" name="Coin B"       ids="4C/1C,3C/1C,2C/1C,1C/1C,1C/2C,1C/3C,1C/4C,1C/5C,1C/6C,2C/1C 5/3 6/4,2C/1C 4/3,1C/1C 5/6,1C/1C 4/5,1C/1C 2/3,1C/2C 5/11,1C/2C 4/9"/>
     </switches>
 
-    <!-- Index 0: Main CPU ROMs — 48 KB contiguous into 0x0000-0xBFFF
-         monsterb parent set (MAME segag80r.cpp:1622-1665).
-         cpu-u25 + u1..u23 = 24 × 2 KB = 48 KB at 0x0000-0xBFFF. No padding needed. -->
+    <!-- Index 0: ROM -->
     <rom index="0" md5="none" zip="monsterb.zip">
         <part crc="19761be3" name="1778.cpu-u25"/>
         <part crc="5b67dc4c" name="1779c.prom-u1"/>
@@ -110,55 +70,36 @@
         <part crc="f38488fe" name="1801b.prom-u23"/>
     </rom>
 
-    <!-- Index 7: Background board tile ROMs (MAME "gfx1", 2 x 8 KB RAW).
-         ROM_REGION is 0x10000 because MAME materialises monsterb_expand_gfx's
-         16-bank expansion; only 0x4000 is real ROM. Do NOT pre-expand here —
-         segag80_bg.sv does the banking as address arithmetic:
-         rom_p0[{bank[1:0],code,row}] / rom_p1[{bank[3:2],code,row}].
-         Plane 0 (LSB) then plane 1 (MSB) — identical shape to Pig Newton. -->
+    <!-- Index 7: ROM -->
     <rom index="7" md5="none" zip="monsterb.zip">
         <part crc="e93a2281" name="1516.bg-u13"/>
         <part crc="1e589101" name="1517.bg-u8"/>
     </rom>
 
-    <!-- Index 8: Background board TILEMAP ROM (MAME "gfx2", 1 x 8 KB).
-         Tilemap is 32 tiles wide x region_bytes/32 = 256 tall -> 256x2048 px,
-         so xmask=0xFF ymask=0x7FF. The SCN0-2 bits of port 4 ($BC) select one
-         of 8 pages: bg_scrolly = (data << 4) & 0x700 = 8 x 256 lines. -->
+    <!-- Index 8: ROM -->
     <rom index="8" md5="none" zip="monsterb.zip">
         <part crc="2d5932fe" name="1518a.bg-u22"/>
     </rom>
 
-    <!-- Index 6: uPD7751 program ROM (1 KB, MAME "soundbrd:audiocpu").
-         The 7751 is an MCS-48 part; monsterb_voice.sv runs it on the existing
-         i8035/t48_core wrapper with EA=1, feeding this on the external bus. -->
+    <!-- Index 6: ROM -->
     <rom index="6" md5="none" zip="monsterb.zip">
         <part crc="6a9534fc" name="7751.bin"/>
     </rom>
 
-    <!-- Index 9: uPD7751 sample ROMs (2 x 4 KB = 8 KB, "soundbrd:upd7751").
-         Addressed by the i8243 expander: P4/P5/P6 give address bits 0-3/4-7/
-         8-11, P7 selects the ROM (active low). Raw 8-bit PCM straight to an
-         R-2R ladder on the 7751's port 1 — no LPC, unlike Astro Blaster. -->
+    <!-- Index 9: ROM -->
     <rom index="9" md5="none" zip="monsterb.zip">
         <part crc="b525ce8f" name="1543snd.bin"/>
         <part crc="56c79fb0" name="1544snd.bin"/>
     </rom>
 
-    <!-- Index 4: 82S123 voice-enable PROM (32 bytes, MAME "prom").
-         sound_a_w indexes it with the top nibble of PPI port A; bits 7-2 of
-         the result are the TMS3617's six voice-enable lines.
-         WARNING: an older revision of this file listed the sound ROMs under
-         <rom index="1">, which is the GAME ID index — do not reuse index 1. -->
+    <!-- Index 4: ROM -->
     <rom index="4" md5="none" zip="monsterb.zip">
         <part crc="414ebe9b" name="pr1512.u31"/>
     </rom>
 
-    <!-- STILL NOT CONSUMED: the SHOT/DIVE discrete circuits. MAME fakes those
-         with samples, so they need the schematic and synthesis. -->
-
-    <!-- Index 2: Reserved for hiscore. -->
+    <!-- Index 2: Reserved -->
     <rom index="2" md5="none"></rom>
+    <!-- Index 3: Hiscore -->
     <rom index="3"></rom>
 
     <mratimestamp>20260510000000</mratimestamp>

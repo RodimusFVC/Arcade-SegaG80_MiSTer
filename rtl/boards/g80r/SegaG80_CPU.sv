@@ -314,8 +314,8 @@ wire [7:0] rom_dout_eff = (sindbadm_en & ~cpu_addr[15]) ? rom_dout_dec : rom_dou
 wire [7:0] mainram_dout;
 wire [7:0] mainram_hs_rd;
 
-assign pr0_i = '{a_addr: {4'd0, (ram_sel & mem_write) ? decrypt_addr[10:0] : cpu_addr[10:0]}, a_d: cpu_dout,
-                a_we: ram_sel & mem_write & ce_cpu, b_addr: {4'd0, hs_address[10:0]}, b_d: hs_data_in, b_we: hs_write};
+assign pr0_i = '{a_addr: {5'd0, (ram_sel & mem_write) ? decrypt_addr[10:0] : cpu_addr[10:0]}, a_d: cpu_dout,
+                a_we: ram_sel & mem_write & ce_cpu, b_addr: {5'd0, hs_address[10:0]}, b_d: hs_data_in, b_we: hs_write};
 assign mainram_dout  = pr0_o.a_q;
 assign mainram_hs_rd = pr0_o.b_q;
 

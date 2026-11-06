@@ -17,10 +17,9 @@
     <rbf>SegaG80</rbf>
     <about></about>
 
-    <buttons names="Shoot,Not Used,Not Used,Not Used,Coin,Start 1P,Start 2P,Pause" default="A,B,X,Y,Select,Start,R,L"/>
+    <buttons names="Shoot,-,-,-,Coin,Start 1P,Start 2P,Pause" default="A,Select,Start,R,L"/>
 
-    <!-- Index 1: Game ID byte — MUST appear before index 0 in MRA.
-         0x03 = 005 (315-0070 security chip). -->
+    <!-- Index 1: Config -->
     <rom index="1"><part>03</part></rom>
 
     <resolution>15kHz</resolution>
@@ -33,30 +32,6 @@
     <num_buttons>1</num_buttons>
     <button_names>Fire</button_names>
 
-    <!--
-      DIP layout (MAME segag80r.cpp:762-790 + g80r_generic at 631-710)
-
-      Byte 0 (dip_sw0, D3D2 = SW1):
-        bit 0..1  Lives      SW1:8,7  (00=3*, 10=4, 01=5, 11=6)
-        bit 2     Cabinet    SW1:6    (0=Cocktail, 1=Upright*)
-        bit 3..7  Unused              (default 1)
-
-      Byte 1 (dip_sw1, D1D0 = SW2):
-        bit 0..3  Coin A     SW2:8..5 (same table as astrob)
-        bit 4..7  Coin B     SW2:4..1
-
-      Factory default: FC 33
-        FC = 1111 1100
-             |||| ||+-- Lives bit0 = 0
-             |||| |+--- Lives bit1 = 0  → Lives = 00 = 3
-             |||| +---- Cabinet = 1     → Upright
-             ++++------ Unused = 1
-        33 = 0011 0011  → 1C/1C both coins
-
-      NOTE: GAME_ID blocker — current RBF has GAME_ID=0 (315-0062/ASTROB) hardwired.
-      005 requires 315-0070 security chip (GAME_ID TBD once runtime selection is added).
-      Core change needed before this game can decrypt correctly.
-    -->
     <switches default="FC 33">
         <dip bits="0,1"   name="Lives"   ids="3,5,4,6"/>
         <dip bits="2"     name="Cabinet" ids="Cocktail,Upright"/>
@@ -64,10 +39,7 @@
         <dip bits="12,15" name="Coin B"  ids="4C/1C,3C/1C,2C/1C,1C/1C,1C/2C,1C/3C,1C/4C,1C/5C,1C/6C,2C/1C 5/3 6/4,2C/1C 4/3,1C/1C 5/6,1C/1C 4/5,1C/1C 2/3,1C/2C 5/11,1C/2C 4/9"/>
     </switches>
 
-    <!-- Index 0: Main CPU ROMs — 48 KB contiguous into 0x0000-0xBFFF
-         005 parent set (MAME segag80r.cpp:1485-1514).
-         cpu-u25 + u1..u20 = 21 × 2 KB = 42 KB at 0x0000-0xA7FF.
-         Pad 0xA800-0xBFFF with 0xFF (sockets unpopulated). -->
+    <!-- Index 0: ROM -->
     <rom index="0" md5="none" zip="005.zip">
         <part crc="8e68533e" name="1346b.cpu-u25"/>
         <part crc="29e10a81" name="5092.prom-u1"/>
@@ -90,26 +62,21 @@
         <part crc="48a20617" name="5109.prom-u18"/>
         <part crc="7d26111a" name="5110.prom-u19"/>
         <part crc="a888e175" name="5111.prom-u20"/>
-        <!-- 0xA800-0xBFFF unpopulated on real PCB -->
         <part repeat="0x1800">FF</part>
     </rom>
 
-    <!-- 005 sound board (Sega 834-0130). No sound CPU — a discrete melody
-         generator plus seven effect voices, all synthesized in RTL.
-         Index 1 is the GAME ID index — do not reuse it for ROMs.
-
-         Index 5: epr-1286.sound-16, the 2716 melody lookup table (U16).
-         Index 10: 6331.sound-u8, the 32x8 divisor PROM (U8). MAME marks this
-         one BAD_DUMP, so melody pitches may be off until a good dump exists. -->
+    <!-- Index 5: ROM -->
     <rom index="5" md5="none" zip="005.zip">
         <part crc="fbe0d501" name="epr-1286.sound-16"/>
     </rom>
+    <!-- Index 10: ROM -->
     <rom index="10" md5="none" zip="005.zip">
         <part crc="1d298cb0" name="6331.sound-u8"/>
     </rom>
 
-    <!-- Index 2: Reserved for hiscore. -->
+    <!-- Index 2: Reserved -->
     <rom index="2" md5="none"></rom>
+    <!-- Index 3: Hiscore -->
     <rom index="3"></rom>
 
     <mratimestamp>20260510000000</mratimestamp>

@@ -19,19 +19,13 @@ set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/g80r/segag80_vtg.sv
 set_global_assignment -name VERILOG_FILE       rtl/mister_custom/pause.v
 set_global_assignment -name VERILOG_FILE       rtl/mister_custom/hiscore.v
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/mister_custom/controllers.sv
-set_global_assignment -name VHDL_File          rtl/cpu/T80/T80.vhd
-set_global_assignment -name VHDL_File          rtl/cpu/T80/T80s.vhd
-set_global_assignment -name VHDL_File          rtl/cpu/T80/T80_Pack.vhd
-set_global_assignment -name VHDL_File          rtl/cpu/T80/T80_MCode.vhd
-set_global_assignment -name VHDL_File          rtl/cpu/T80/T80_ALU.vhd
-set_global_assignment -name VHDL_File          rtl/cpu/T80/T80_Reg.vhd
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/rodimus/t80sv/t80sv_all.sv
 set_global_assignment -name SYSTEMVERILOG_FILE          rtl/ram_rom/dpram_dc.sv
-set_global_assignment -name VERILOG_FILE       rtl/ram_rom/spram.v
 
-set_global_assignment -name QIP_FILE rtl/sound/i8039/i8039.qip
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/rodimus/t48sv/t48sv_all.sv
 
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/sp0250/sp0250_coef_rom.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/sp0250/sp0250.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/rodimus/sp0250/sp0250_coef_rom.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/rodimus/sp0250/sp0250.sv
 
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/g80r/sound/segaspeech/segaspeech.sv
 
@@ -40,11 +34,10 @@ set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/g80r/sound/usb/usb_noi
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/g80r/sound/usb/usb_filter.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/g80r/sound/usb/sega_usb.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/g80r/sound/monsterb/monsterb_voice.sv
-set_global_assignment -name VERILOG_FILE       rtl/sound/usb/i8035.v
 
-set_global_assignment -name QIP_FILE rtl/sound/jt89/syn/quartus/jt89_verilog.qip
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/rodimus/sn76489sv/sn76489sv.sv
 
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/tms36xx.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/rodimus/tms36xx/tms36xx.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/g80r/sound/monsterb/monsterb_music.sv
 
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/g80r/sound/005/svf.sv

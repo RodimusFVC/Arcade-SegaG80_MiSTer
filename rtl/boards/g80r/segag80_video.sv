@@ -48,8 +48,8 @@ module segag80_video (
     reg [12:0] scan_addr;
     wire [7:0] vram_cpu_rd  = vram_pr_o.a_q;
     wire [7:0] vram_scan_rd = vram_pr_o.b_q;
-    assign vram_pr_i = '{a_addr: {2'd0, cpu_addr}, a_d: cpu_din, a_we: vram_write,
-                         b_addr: {2'd0, scan_addr}, b_d: 8'd0, b_we: 1'b0};
+    assign vram_pr_i = '{a_addr: {3'd0, cpu_addr}, a_d: cpu_din, a_we: vram_write,
+                         b_addr: {3'd0, scan_addr}, b_d: 8'd0, b_we: 1'b0};
 
     assign cpu_dout = vram_cpu_rd;
 
