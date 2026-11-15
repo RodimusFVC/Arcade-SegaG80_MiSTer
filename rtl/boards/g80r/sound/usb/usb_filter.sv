@@ -41,9 +41,6 @@ module usb_filter (
 	function automatic logic signed [W-1:0] e_ncr(input logic signed [W-1:0] d);
 		e_ncr = (d >>> 13) + (d >>> 15) - (d >>> 20);
 	endfunction
-	function automatic logic signed [W-1:0] e_final(input logic signed [W-1:0] d);
-		e_final = (d >>> 20) + (d >>> 23) - (d >>> 26);
-	endfunction
 	function automatic logic signed [W-1:0] e_p0(input logic signed [W-1:0] d);
 		e_p0 = (d >>> 9) + (d >>> 11) - (d >>> 13) + (d >>> 15);
 	endfunction
@@ -147,6 +144,13 @@ module usb_filter (
 	wire signed [W-1:0] g1_n  = cfg_g ? b_g1  : a_g1;
 	wire signed [W-1:0] g2_n  = cfg_g ? b_g2  : a_g2;
 
+	// final CR filter: the capacitor carries 16 extra fraction bits, so its 1/940000 step keeps tracking small
+	// differences instead of freezing with a DC residue once the difference drops below 1/16 of full scale
+	logic signed [W+15:0] fin_x;
+	wire  signed [W+15:0] fin_d   = $signed({acc, 16'd0}) - fin_x;
+	wire  signed [W+15:0] fin_x_n = fin_x + (fin_d >>> 20) + (fin_d >>> 23) - (fin_d >>> 26);
+	assign fin = fin_x[W+15:16];
+
 	wire signed [W-1:0] fin_out = acc - fin;
 	wire signed [W-1:0] scaled  = (fin_out >>> 3) - (fin_out >>> 5)
 	                            + (fin_out >>> 7) - (fin_out >>> 9);
@@ -159,7 +163,7 @@ module usb_filter (
 	always_ff @(posedge clk) begin
 		if (reset) begin
 			nf0 <= '0; nf1 <= '0; nf2 <= '0; ncr <= '0; nv <= '0;
-			fin <= '0; acc <= '0; audio <= 16'sd0;
+			fin_x <= '0; acc <= '0; audio <= 16'sd0;
 			st  <= 3'd0; busy <= 1'b0;
 			for (i = 0; i < 3; i = i + 1) begin
 				cf0[i] <= '0; cf1[i] <= '0; gt1[i] <= '0; gt2[i] <= '0;
@@ -188,7 +192,7 @@ module usb_filter (
 					acc      <= acc + mix;
 				end
 				3'd4: begin
-					fin   <= fin + e_final(fin_out);
+					fin_x <= fin_x_n;
 					audio <= clamped;
 				end
 				default: ;

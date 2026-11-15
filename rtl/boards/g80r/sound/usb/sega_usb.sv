@@ -174,7 +174,9 @@ module sega_usb #(
 
 	wire [1:0] grp     = addr_lo[4:3];
 	wire       is_ctc  = (addr_lo[2] == 1'b0);
-	wire       in_regs = (addr_lo < 8'h18);
+	// timer / envelope registers decode in RAM bank 0 only: the program keeps variables at the same low offsets
+	// in banks 1-3, and those writes must reach plain RAM, not the timers
+	wire       in_regs = (work_bank == 2'd0) && (addr_lo < 8'h18);
 
 	wire tmr_wr0 = movx_wr && in_regs && is_ctc && (grp == 2'd0);
 	wire tmr_wr1 = movx_wr && in_regs && is_ctc && (grp == 2'd1);
